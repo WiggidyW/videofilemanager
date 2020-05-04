@@ -1,0 +1,1 @@
+/mnt/c/Users/user/Programming/private/videofilemanager/common/target/debug/libcommon.rlib: /mnt/c/Users/user/Programming/private/videofilemanager/common/src/imdbid.rs /mnt/c/Users/user/Programming/private/videofilemanager/common/src/lib.rs
