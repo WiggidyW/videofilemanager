@@ -1,32 +1,97 @@
 use regex::Regex;
 use lazy_static::lazy_static;
 
-pub trait Imdbid {
-	type Error: std::fmt::Debug;
-	fn is_valid(&self) -> Result<(), Self::Error>;
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error>;
-	fn to_string(&self, pad: usize) -> Result<String, Self::Error> {
-		match self.to_digits(pad) {
-			Err(e) => Err(e),
-			Ok(s) => Ok(format!("tt{}", s)),
+pub trait AsImdbid {
+	fn digits(&self, pad: usize) -> String;
+	fn full(&self, pad: usize) -> String {
+		format!("tt{}", self.digits(pad))
+	}
+}
+
+macro_rules! format_digits {
+	($item:tt, $pad:ident) => {
+		format!("{:0>1$}", $item, $pad)
+	}
+}
+
+macro_rules! impl_as_imdbid_str {
+	($type:ty) => { impl AsImdbid for $type {
+		fn digits(&self, pad: usize) -> String {
+			match &self[0..2] {
+				"tt" => format_digits!((self.split_at(2).1), pad),
+				_ => format_digits!(self, pad),
+		}}
+}}}
+
+macro_rules! impl_as_imdbid_osstr {
+	($type:ty) => { impl AsImdbid for $type {
+		fn digits(&self, pad: usize) -> String {
+			let s = self.to_str().unwrap();
+			match &s[0..2] {
+				"tt" => format_digits!((s.split_at(2).1), pad),
+				_ => format_digits!(s, pad),
+		}}
+}}}
+
+macro_rules! impl_as_imdbid_num {
+	($type:ty) => { impl AsImdbid for $type {
+		fn digits(&self, pad: usize) -> String {
+			format_digits!(self, pad)
 		}
-	}
+}}}
+
+lazy_static! {
+	static ref IMDBID_PATH: Regex = Regex::new(r"^tt[0-9]{0,7}[1-9]$").unwrap();
+}
+macro_rules! impl_as_imdbid_path {
+	($type:ty) => { impl AsImdbid for $type {
+		fn digits(&self, pad: usize) -> String {
+			format_digits!(
+				(self.ancestors()
+					.filter_map(|p| p.file_name())
+					.filter_map(|p| p.to_str())
+					.filter(|p| IMDBID_PATH.is_match(p))
+					.next()
+					.unwrap()
+					.split_at(2).1),
+				pad
+		)}
+}}}
+
+impl_as_imdbid_str!(str);
+impl_as_imdbid_str!(String);
+
+impl_as_imdbid_osstr!(std::ffi::OsStr);
+impl_as_imdbid_osstr!(std::ffi::OsString);
+
+impl_as_imdbid_num!(u8);
+impl_as_imdbid_num!(i8);
+impl_as_imdbid_num!(u16);
+impl_as_imdbid_num!(i16);
+impl_as_imdbid_num!(u32);
+impl_as_imdbid_num!(i32);
+impl_as_imdbid_num!(u64);
+impl_as_imdbid_num!(i64);
+impl_as_imdbid_num!(usize);
+impl_as_imdbid_num!(isize);
+
+impl_as_imdbid_path!(std::path::Path);
+impl_as_imdbid_path!(std::path::PathBuf);
+
+pub enum Error {
+	NumberZero,
+	NumberNegative,
+	NumberTooLarge,
+	TextInvalid,
+	TextInvalidUnicode,
+	NoValidAncestors,
 }
 
-#[derive(Debug)]
-pub struct ImdbidOwned<T> {
-	inner: T,
-}
-
-impl<T> Imdbid for ImdbidOwned<T> where
-	T: Imdbid
-{
-	type Error = std::convert::Infallible;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		Ok(())
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		Ok(<T as Imdbid>::to_digits(&self.inner, pad).unwrap())
+pub trait TryAsImdbid {
+	fn valid(&self) -> Result<(), Error>;
+	fn digits(&self, pad: usize) -> Result<String, Error>;
+	fn full(&self, pad: usize) -> Result<String, Error> {
+		Ok(format!("tt{}", self.digits(pad)?))
 	}
 }
 
@@ -34,172 +99,82 @@ lazy_static! {
 	static ref IMDBID: Regex = Regex::new(r"^(tt)?[0-9]{0,7}[1-9]$").unwrap();
 }
 
-impl Imdbid for str {
-	type Error = String;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		match IMDBID.is_match(self) {
-			true => Ok(()),
-			false => Err(format!("{} is an invalid Imdbid.", self)),
-		}
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		match self.is_valid() {
-			Err(e) => Err(e),
-			Ok(_) => Ok(
-				format!("{:0>1$}", self.split_at(
-					self.find(|c| c != 't' && c != '0').unwrap()).1,
-					pad)
-				),
-		}
-	}
-}
+macro_rules! impl_try_as_imdbid_str {
+	($type:ty) => { impl TryAsImdbid for $type {
+		fn valid(&self) -> Result<(), Error> {
+			match IMDBID.is_match(self) {
+				true => Ok(()),
+				false => Err(Error::TextInvalid),
+		}}
+		fn digits(&self, pad: usize) -> Result<String, Error> {
+			self.valid()
+				.map(|_| match &self[0..2] {
+					"tt" => format_digits!((self.split_at(2).1), pad),
+					_ => format_digits!(self, pad),
+		})}
+}}}
 
-impl Imdbid for String {
-	type Error = <str as Imdbid>::Error;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		<str as Imdbid>::is_valid(self)
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		<str as Imdbid>::to_digits(self, pad)
-	}
-}
-
-impl Imdbid for std::ffi::OsStr {
-	type Error = String;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		match self.to_str() {
-			Some(s) => <str as Imdbid>::is_valid(s),
-			None => Err(format!("{:?} is an invalid Imdbid. It is invalid unicode.", self)),
-		}
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		match self.to_str() {
-			Some(s) => <str as Imdbid>::to_digits(s, pad),
-			None => Err(format!("{:?} is an invalid Imdbid. It is invalid unicode.", self)),
-		}
-	}
-}
-
-impl Imdbid for std::ffi::OsString {
-	type Error = <std::ffi::OsStr as Imdbid>::Error;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		<std::ffi::OsStr as Imdbid>::is_valid(self)
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		<std::ffi::OsStr as Imdbid>::to_digits(self, pad)
-	}
-}
-
-impl Imdbid for std::path::Path {
-	type Error = String;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		match self.ancestors()
-			.filter_map(|p| p.file_name())
-			.filter_map(|p| p.to_str())
-			.filter(|p| IMDBID.is_match(p))
-			.next()
-		{
-			Some(_) => Ok(()),
-			None => Err(format!("{} has no valid Imdbid ancestors.", self.display())),
-		}
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		for ancestor in self.ancestors()
-			.filter_map(|p| p.file_name())
-			.filter_map(|p| p.to_str())
-		{
-			match <str as Imdbid>::to_digits(ancestor, pad) {
-				Err(_) => (),
-				Ok(s) => return Ok(s),
-			}
-		}
-		Err(format!("{} has no valid Imdbid ancestors.", self.display()))
-	}
-}
-
-impl Imdbid for std::path::PathBuf {
-	type Error = <std::path::Path as Imdbid>::Error;
-	fn is_valid(&self) -> Result<(), Self::Error> {
-		<std::path::Path as Imdbid>::is_valid(self)
-	}
-	fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-		<std::path::Path as Imdbid>::to_digits(self, pad)
-	}
-}
-
-macro_rules! impl_imdbid_try_from {
-	($type:ty) => {
-		impl std::convert::TryFrom<$type> for ImdbidOwned<$type> {
-			type Error = <$type as Imdbid>::Error;
-			fn try_from(value: $type) -> Result<Self, Self::Error> {
-				match <$type as Imdbid>::is_valid(&value) {
-					Ok(_) => Ok(Self{ inner: value }),
-					Err(e) => Err(e),
-				}
-			}
-		}
-	}
-}
-
-macro_rules! impl_imdbid_small_num {
-	($type:ty) => {
-		impl Imdbid for $type {
-			type Error = String;
-			fn is_valid(&self) -> Result<(), Self::Error> {
-				match self > &0 {
+macro_rules! impl_try_as_imdbid_osstr {
+	($type:ty) => { impl TryAsImdbid for $type {
+		fn valid(&self) -> Result<(), Error> {
+			match self.to_str() {
+				None => Err(Error::TextInvalidUnicode),
+				Some(s) => match IMDBID.is_match(s) {
 					true => Ok(()),
-					false => Err(format!("{} is an invalid Imdbid as it is <= 0 or >= 100,000,000.", self)),
-				}
-			}
-			fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-				match self.is_valid() {
-					Err(e) => Err(e),
-					Ok(_) => Ok(format!("{:0>1$}", self, pad)),
-				}
-			}
+					false => Err(Error::TextInvalid),
+		}}}
+		fn digits(&self, pad: usize) -> Result<String, Error> {
+			self.valid()
+				.map(|_| self.to_str().unwrap())
+				.map(|s| match &s[0..2] {
+					"tt" => format_digits!((s.split_at(2).1), pad),
+					_ => format_digits!(s, pad),
+		})}
+}}}
+
+macro_rules! impl_try_as_imdbid_num {
+	($type:ty) => { impl TryAsImdbid for $type {
+		fn valid(&self) -> Result<(), Error> {
+			match self {
+				&0 => Err(Error::NumberZero),
+				_ if self < &0 => Err(Error::NumberNegative),
+				_ if self > &99_999_999 => Err(Error::NumberTooLarge),
+				_ => Ok(()),
+		}}
+		fn digits(&self, pad: usize) -> Result<String, Error> {
+			self.valid()
+				.map(|_| format_digits!(self, pad))
 		}
-}}
+}}}
 
-macro_rules! impl_imdbid_big_num {
-	($type:ty) => {
-		impl Imdbid for $type {
-			type Error = String;
-			fn is_valid(&self) -> Result<(), Self::Error> {
-				match self > &0 && self < &100_000_000 {
-					true => Ok(()),
-					false => Err(format!("{} is an invalid Imdbid as it is <= 0 or >= 100,000,000.", self)),
-				}
-			}
-			fn to_digits(&self, pad: usize) -> Result<String, Self::Error> {
-				match self.is_valid() {
-					Err(e) => Err(e),
-					Ok(_) => Ok(format!("{:0>1$}", self, pad)),
-				}
-			}
+macro_rules! impl_try_as_imdbid_smallnum {
+	($type:ty) => { impl TryAsImdbid for $type {
+		fn valid(&self) -> Result<(), Error> {
+			match self {
+				&0 => Err(Error::NumberZero),
+				_ if self < &0 => Err(Error::NumberNegative),
+				_ => Ok(()),
+		}}
+		fn digits(&self, pad: usize) -> Result<String, Error> {
+			self.valid()
+				.map(|_| format_digits!(self, pad))
 		}
-}}
+}}}
 
-impl_imdbid_small_num!(u8);
-impl_imdbid_small_num!(i8);
-impl_imdbid_small_num!(u16);
-impl_imdbid_small_num!(i16);
-impl_imdbid_big_num!(u32);
-impl_imdbid_big_num!(i32);
-impl_imdbid_big_num!(u64);
-impl_imdbid_big_num!(i64);
-impl_imdbid_big_num!(usize);
-impl_imdbid_big_num!(isize);
+impl_try_as_imdbid_str!(str);
+impl_try_as_imdbid_str!(String);
 
-impl_imdbid_try_from!(String);
-impl_imdbid_try_from!(std::ffi::OsString);
-impl_imdbid_try_from!(std::path::PathBuf);
-impl_imdbid_try_from!(u8);
-impl_imdbid_try_from!(u16);
-impl_imdbid_try_from!(u32);
-impl_imdbid_try_from!(u64);
-impl_imdbid_try_from!(usize);
-impl_imdbid_try_from!(i8);
-impl_imdbid_try_from!(i16);
-impl_imdbid_try_from!(i32);
-impl_imdbid_try_from!(i64);
-impl_imdbid_try_from!(isize);
+impl_try_as_imdbid_osstr!(std::ffi::OsStr);
+impl_try_as_imdbid_osstr!(std::ffi::OsString);
+
+impl_try_as_imdbid_smallnum!(u8);
+impl_try_as_imdbid_smallnum!(i8);
+impl_try_as_imdbid_smallnum!(u16);
+impl_try_as_imdbid_smallnum!(i16);
+
+impl_try_as_imdbid_num!(u32);
+impl_try_as_imdbid_num!(i32);
+impl_try_as_imdbid_num!(u64);
+impl_try_as_imdbid_num!(i64);
+impl_try_as_imdbid_num!(usize);
+impl_try_as_imdbid_num!(isize);
