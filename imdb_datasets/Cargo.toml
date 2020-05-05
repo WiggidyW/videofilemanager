@@ -4,12 +4,15 @@ version = "0.1.0"
 authors = ["WiggidyW <rlr0017@auburn.edu>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 common = { path = "../common" }
-flate2 = { version = "^1.0" }
-csv = { version = "^1.1" }
-chrono = { version = "^0.4" }
-bytes = { version = "^0.5" }
 reqwest = { version = "^0.10", default-features = false, features = ["blocking", "rustls"] }
+chrono = { version = "^0.4", features = ["serde"] }
+serde = { version = "^1.0", features = ["derive"] }
+flate2 = { version = "^1.0" }
+bincode = { version = "1.2" }
+bytes = { version = "^0.5" }
+csv = { version = "^1.1" }
+
+[profile.dev]
+opt-level = 0
