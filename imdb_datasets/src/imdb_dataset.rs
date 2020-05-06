@@ -1,105 +1,92 @@
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use std::convert::TryFrom;
-use serde::{Serialize, Deserialize};
+use std::ops::Deref;
+
+const TITLE_EPISODE: &'static str = "https://datasets.imdbws.com/title.episode.tsv.gz";
+pub type TitleEpisode = ImdbDataset<Vec<TitleEpisodeEntry>, TITLE_EPISODE>;
 
 #[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct ImdbDataset<T> {
-	timestamp: crate::DateTime,
+pub struct ImdbDataset<T, const URL: &'static str> {
 	inner: T,
 }
 
-impl<T, U> TryFrom<crate::MetadataRes<U>> for ImdbDataset<T> where
-	U: crate::MetadataRequest,
-	T: TryFrom<U>,
-{
-	type Error = <T as TryFrom<U>>::Error;
-	fn try_from(value: crate::MetadataRes<U>) -> Result<Self, Self::Error> {
-		Ok(Self{
-			timestamp: value.timestamp,
-			inner: <T as TryFrom<U>>::try_from(value.data)?,
-		})
-	}
-}
-
-pub struct ImdbDatasetRes<
-	const URL: &'static str,
-> {
-	inner: bytes::Bytes,
-}
-
-impl<const URL: &'static str> crate::MetadataRequest for ImdbDatasetRes<URL> {
-	type Error = reqwest::Error;
-	fn request() -> Result<Self, Self::Error> {
-		Ok(Self{
-			inner: reqwest::blocking::get(URL)?
-				.error_for_status()?
-				.bytes()?
-		})
-	}
-}
-
-impl<const URL: &'static str> ImdbDatasetRes<URL> {
-	fn bytes(&self) -> &[u8] {
-		<bytes::Bytes as AsRef<[u8]>>::as_ref(&self.inner)
-	}
-}
-
-macro_rules! read_res_string_records {
-	($res:ident) => {
-		csv::ReaderBuilder::new()
-			.delimiter(b'\t')
-			.from_reader(flate2::read::GzDecoder::new($res.bytes()))
-			.records()
-	}
-}
-
-const TITLE_EPISODE: &'static str = "https://datasets.imdbws.com/title.episode.tsv.gz";
-pub type TitleEpisode = Vec<TitleEpisodeEntry>;
-
-#[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct TitleEpisodeEntry {
-	pub imdbid: String,
-	pub seriesid: String,
-	pub season: Option<u16>,
-	pub episode: Option<u16>,
-}
-
-impl From<csv::StringRecord> for TitleEpisodeEntry {
-	fn from(value: csv::StringRecord) -> Self {
-		Self {
-            imdbid: value[0].to_string(),
-            seriesid: value[1].to_string(),
-            season: {
-                match value[2].parse::<u16>() {
-                    Ok(i) => Some(i),
-                    Err(_) => None,
-            }},
-            episode: {
-                match value[3].parse::<u16>() {
-                    Ok(i) => Some(i),
-                    Err(_) => None,
-            }},
-        }
-	}
-}
-
-impl TryFrom<ImdbDatasetRes<TITLE_EPISODE>> for TitleEpisode {
-	type Error = csv::Error;
-	fn try_from(value: ImdbDatasetRes<TITLE_EPISODE>) -> Result<Self, Self::Error> {
-		let mut vec: Vec<TitleEpisodeEntry> = Vec::new();
-		for row in read_res_string_records!(value) {
-			vec.push(TitleEpisodeEntry::from(row?));
-		}
-		Ok(vec)
-	}
-}
-
-impl crate::Metadata for ImdbDataset<TitleEpisode> {
-	type Request = ImdbDatasetRes<TITLE_EPISODE>;
-	type Data = TitleEpisode;
-	fn timestamp(&self) -> &crate::DateTime {
-		&self.timestamp
-	}
-	fn data(&self) -> &Self::Data {
+impl<T, const URL: &'static str> Deref for ImdbDataset<T, URL> {
+	type Target = T;
+	fn deref(&self) -> &Self::Target {
 		&self.inner
 	}
 }
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct ImdbDatasetResponse {
+	inner: bytes::Bytes,
+}
+
+impl ImdbDatasetResponse {
+	fn bytes(&self) -> &[u8] {
+		<bytes::Bytes as AsRef<[u8]>>::as_ref(&self.inner)
+	}
+	fn new(url: &str) -> Result<Self, reqwest::Error> {
+		Ok(Self{ inner: reqwest::blocking::get(url)?
+			.error_for_status()?
+			.bytes()?
+		})
+	}
+	fn deserialize<T>(self) -> Result<Vec<T>, csv::Error> where
+		T: DeserializeOwned,
+	{
+		csv::ReaderBuilder::new()
+			.delimiter(b'\t')
+			.from_reader(flate2::read::GzDecoder::new(self.bytes()))
+			.deserialize()
+			.collect::<Result<Vec<T>, csv::Error>>()
+	}
+}
+
+impl<T, const URL: &'static str> crate::Request for ImdbDataset<T, URL> {
+	type Error = reqwest::Error;
+	type Response = ImdbDatasetResponse;
+	fn request() -> Result<Self::Response, Self::Error> {
+		ImdbDatasetResponse::new(URL)
+	}
+}
+
+impl<T, const URL: &'static str> TryFrom<ImdbDatasetResponse> for ImdbDataset<T, URL> where
+	T: TryFrom<ImdbDatasetResponse>,
+{
+	type Error = <T as TryFrom<ImdbDatasetResponse>>::Error;
+	fn try_from(value: ImdbDatasetResponse) -> Result<Self, Self::Error> {
+		Ok(Self {
+			inner: <T as TryFrom<ImdbDatasetResponse>>::try_from(value)?
+		})
+	}
+}
+
+impl<T> TryFrom<ImdbDatasetResponse> for Vec<T> where
+	T: Row,
+	T: Serialize,
+	T: DeserializeOwned,
+{
+	type Error = csv::Error;
+	fn try_from(value: ImdbDatasetResponse) -> Result<Self, Self::Error> {
+		value.deserialize()
+	}
+}
+
+pub trait Row {}
+
+// https://docs.rs/csv/1.0.0-beta.5/csv/tutorial/index.html#handling-invalid-data-with-serde
+#[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct TitleEpisodeEntry {
+	#[serde(rename = "tconst")]
+	pub imdbid: String,
+	#[serde(rename = "parentTconst")]
+	pub seriesid: String,
+	#[serde(rename = "seasonNumber")]
+	#[serde(deserialize_with = "csv::invalid_option")]
+	pub season: Option<u32>,
+	#[serde(rename = "episodeNumber")] 
+	#[serde(deserialize_with = "csv::invalid_option")]
+	pub episode: Option<u32>,
+}
+impl Row for TitleEpisodeEntry {}
