@@ -1,3 +1,6 @@
+#![feature(const_generics)]
+#![allow(incomplete_features)]
+
 mod imdb_dataset;
 
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
@@ -9,8 +12,8 @@ type DateTime = chrono::DateTime<chrono::offset::Utc>;
 
 #[derive(Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct MetadataRes<T> {
-    timestamp: DateTime,
-    inner: T,
+    pub timestamp: DateTime,
+    pub data: T,
 }
 
 pub trait MetadataRequest: Sized {
@@ -24,7 +27,7 @@ impl<T> From<T> for MetadataRes<T> where
     fn from(value: T) -> Self {
         Self {
             timestamp: chrono::offset::Utc::now(),
-            inner: value,
+            data: value,
         }
     }
 }
@@ -42,7 +45,9 @@ pub trait Metadata:
     DeserializeOwned
 {
     type Request: MetadataRequest;
+    type Data;
     fn timestamp(&self) -> &DateTime;
+    fn data(&self) -> &Self::Data;
     fn request() -> Result<MetadataRes<Self::Request>, RequestError<Self>> {
         Ok(MetadataRes::from(<Self::Request as MetadataRequest>::request()?))
     }
