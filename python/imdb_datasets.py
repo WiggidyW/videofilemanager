@@ -41,12 +41,12 @@ class TitleEpisode(Dataset):
 		return "https://datasets.imdbws.com/title.episode.tsv.gz"
 
 	def parse(self, row:List[str]) -> list:
-		parsed = []
-		parsed.append(int(row[0][2:]))
-		parsed.append(int(row[1][2:]))
-		parsed.append(int(row[2]) if row[2].isdigit() else None)
-		parsed.append(int(row[3]) if row[3].isdigit() else None)
-		return parsed
+		return [
+			int(row[0][2:])
+			int(row[1][2:])
+			int(row[2]) if row[2].isdigit() else None
+			int(row[2]) if row[2].isdigit() else None
+		]
 
 	def insert(self, cursor:sqlite3.Cursor, parsed_row:list) -> None:
 		cursor.execute('''

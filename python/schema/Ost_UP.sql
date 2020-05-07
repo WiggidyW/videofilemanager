@@ -1,0 +1,6 @@
+CREATE TABLE Ost (
+	subid INTEGER PRIMARY KEY,
+	imdbid INTEGER NOT NULL,
+	timestamp REAL NOT NULL,
+	data TEXT NOT NULL,
+);

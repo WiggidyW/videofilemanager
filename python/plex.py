@@ -25,12 +25,12 @@ class Film(ABC):
 	def imdbid(self) -> Union[str, int]:
 		raise NotImplementedError
 
-def refresh(film: Film) -> None:
-	for entry in film.plex_target.iterdir():
-		if film.plex_target.name in entry.name:
-			entry.unlink() # panicks if entry is a directory!
-	with open(film.plex_target.with_suffix('srt'), 'w') as f:
-		f.write(util.Imdbid.full(film.imdbid, 7))
-	film.video.link_to(film.plex_target.with_suffix(film.video.suffix))
-	for i, subtitle in enumerate(film.subtitles):
-		subtitle.link_to(film.plex_target.with_suffix('{}{}'.format(i, subtitle.suffix)))
+	def refresh(self) -> None:
+		for entry in self.plex_target.iterdir():
+			if self.plex_target.name in entry.name:
+				entry.unlink() # panicks if entry is a directory!
+		with open(self.plex_target.with_suffix('srt'), 'w') as f:
+			f.write(util.Imdbid.full(self.imdbid, 7))
+		self.video.link_to(self.plex_target.with_suffix(self.video.suffix))
+		for i, subtitle in enumerate(self.subtitles):
+			subtitle.link_to(self.plex_target.with_suffix('{}{}'.format(i, subtitle.suffix)))
