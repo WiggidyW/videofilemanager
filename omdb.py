@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Union
+import requests
+import sqlite3
 import time
 import util
 
@@ -20,7 +22,7 @@ class Params(ABC):
 	def apikey(self) -> str:
 		raise NotImplementedError
 
-class Omdb(ABC):
+class Metadata(ABC):
 
 	@property
 	@abstractmethod 
@@ -50,7 +52,7 @@ class Omdb(ABC):
 		assert(data.get('Response', 'False') != 'False')
 		self.insert(cursor, self.parse(data))
 
-class ByImdbid(Omdb):
+class ByImdbid(Metadata):
 
 	@property
 	def url(self):

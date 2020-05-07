@@ -1,13 +1,12 @@
-import sqlite3
-from typing import List
 from abc import ABC, abstractmethod
-import tempfile
+from typing import List
 import requests
+import sqlite3
 import gzip
 import csv
 import io
 
-class Dataset(ABC):
+class Metadata(ABC):
 
 	@property
 	@abstractmethod
@@ -34,7 +33,7 @@ class Dataset(ABC):
 			for row in reader:
 				self.insert(cursor, self.parse(row))
 
-class TitleEpisode(Dataset):
+class TitleEpisode(Metadata):
 
 	@property
 	def url(self):
