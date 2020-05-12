@@ -1,26 +1,11 @@
 from abc import ABC, abstractmethod
+from constants import Constants
 from typing import Union
 import requests
 import sqlite3
+import json
 import time
 import util
-
-class Params(ABC):
-
-	@property
-	@abstractmethod
-	def imdbid(self) -> Union[str, int]
-		raise NotImplementedError
-
-	@property
-	@abstractmethod
-	def plot(self) -> str:
-		raise NotImplementedError
-
-	@property
-	@abstractmethod
-	def apikey(self) -> str:
-		raise NotImplementedError
 
 class Metadata(ABC):
 
@@ -37,20 +22,21 @@ class Metadata(ABC):
 	def insert(self, cursor:sqlite3.Cursor, parsed_data:list) -> None:
 		raise NotImplementedError
 
-	def request(self, params:Params) -> bytes:
+	def request(self, imdbid: Union[str, int], plot: str, apikey: str) -> bytes:
 		res = requests.get(self.url, params={
-			'apikey': params.apikey,
-			'plot': params.plot,
+			'apikey': apikey,
+			'plot': plot,
 			'r': 'json',
-			'i': util.Imdbid.full(params.imdbid, 8),
+			'i': util.Imdbid.full(imdbid, 8),
 		})
 		res.raise_for_status()
 		return res.content
 
-	def refresh(self, cursor:sqlite3.Cursor, params:Params) -> None:
-		data = json.loads(self.request(params))
+	def refresh(self, cursor:sqlite3.Cursor, imdbid: Union[str, int], plot: str, apikey: str) -> None:
+		data = json.loads(self.request(imdbid, plot, apikey))
 		assert(data.get('Response', 'False') != 'False')
 		self.insert(cursor, self.parse(data))
+		Constants.CONN.commit()
 
 class ByImdbid(Metadata):
 
@@ -63,7 +49,7 @@ class ByImdbid(Metadata):
 			int(data['imdbID'][2:]),
 			True if data['Response'] == 'True' else False,
 			time.time(),
-			int(data['Year']),
+			data['Year'],
 			data['Title'],
 			data['Type'],
 			str(data['Ratings']) if data.get('Ratings') else None,

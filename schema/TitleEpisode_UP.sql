@@ -1,6 +1,6 @@
 CREATE TABLE ImdbDatasetTitleEpisode (
-	imdbid INTEGER PRIMARY KEY,
-	seriesid INTEGER NOT NULL,
+	imdbID INTEGER PRIMARY KEY,
+	seriesID INTEGER NOT NULL,
 	season INTEGER,
 	episode INTEGER
 );

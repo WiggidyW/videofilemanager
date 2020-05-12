@@ -18,15 +18,15 @@ class Imdbid:
 
 	@staticmethod
 	def digits(arg: Union[str, int, Path], pad: int) -> str:
-		s = "0"
+		s: Union[str, int] = "0"
 		if isinstance(arg, Path):
 			for part in reversed(arg.parts):
 				if re.fullmatch(r'^tt0*[1-9][0-9]{0,7}$', part):
-					s = re.search(r'[1-9][0-9]{0,7}$', part).group()
+					s = re.search(r'[1-9][0-9]{0,7}$', part).group() # type: ignore
 					break
 		elif Imdbid.valid(arg):
 			if isinstance(arg, str):
-				s = re.search(r'[1-9][0-9]{0,7}$', arg).group()
+				s = re.search(r'[1-9][0-9]{0,7}$', arg).group() # type: ignore
 			elif isinstance(arg, int):
 				s = arg
 		return str(int(s)).zfill(pad)

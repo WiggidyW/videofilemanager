@@ -1,36 +1,18 @@
 from pathlib import Path
-from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import List, Union, Optional
 import util
+import os
 
-class Film(ABC):
-
-	@property
-	@abstractmethod
-	def subtitles(self) -> List[Path]:
-		raise NotImplementedError
-
-	@property
-	@abstractmethod
-	def video(self) -> Path:
-		raise NotImplementedError
-
-	@property
-	@abstractmethod
-	def plex_target(self) -> Path:
-		raise NotImplementedError
-
-	@property
-	@abstractmethod
-	def imdbid(self) -> Union[str, int]:
-		raise NotImplementedError
-
-	def refresh(self) -> None:
-		for entry in self.plex_target.iterdir():
-			if self.plex_target.name in entry.name:
-				entry.unlink() # panicks if entry is a directory!
-		with open(self.plex_target.with_suffix('srt'), 'w') as f:
-			f.write(util.Imdbid.full(self.imdbid, 7))
-		self.video.link_to(self.plex_target.with_suffix(self.video.suffix))
-		for i, subtitle in enumerate(self.subtitles):
-			subtitle.link_to(self.plex_target.with_suffix('{}{}'.format(i, subtitle.suffix)))
+def refresh(subtitles: List[Path], video: Optional[Path], target: Path, imdbid: Union[str, int]):
+	if target.parent.exists():
+		for entry in target.parent.iterdir():
+			if target.name in entry.name:
+				entry.unlink()
+	else:
+		target.parent.mkdir(parents=True)
+	with open(target.with_name(target.name + '.nfo'), 'w') as f:
+		f.write(util.Imdbid.full(imdbid, 7))
+	if video:
+		os.link(video, target.with_name(target.name + video.suffix))
+	for i, subtitle in enumerate(subtitles):
+		os.link(subtitle, target.with_name(target.name + '.{}{}'.format(i, subtitle.suffix)))

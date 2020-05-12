@@ -2,7 +2,7 @@ import flask
 
 mock = flask.Flask(__name__)
 
-TEST_FILE = './resources/title.episode.tsv.gz'
+TEST_FILE = '../resources/title.episode.tsv.gz'
 MOCK_PORT = 5000
 
 @mock.route('/')

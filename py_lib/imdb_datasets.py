@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from constants import Constants
 from typing import List
 import requests
 import sqlite3
@@ -32,6 +33,7 @@ class Metadata(ABC):
 			next(reader) # skip header line
 			for row in reader:
 				self.insert(cursor, self.parse(row))
+		Constants.CONN.commit()
 
 class TitleEpisode(Metadata):
 
@@ -41,10 +43,10 @@ class TitleEpisode(Metadata):
 
 	def parse(self, row:List[str]) -> list:
 		return [
-			int(row[0][2:])
-			int(row[1][2:])
-			int(row[2]) if row[2].isdigit() else None
-			int(row[2]) if row[2].isdigit() else None
+			int(row[0][2:]),
+			int(row[1][2:]),
+			int(row[2]) if row[2].isdigit() else None,
+			int(row[3]) if row[3].isdigit() else None,
 		]
 
 	def insert(self, cursor:sqlite3.Cursor, parsed_row:list) -> None:
