@@ -1,9 +1,9 @@
-from pathlib import Path
 from typing import List, Union, Optional
+from pathlib import Path
 import util
 import os
 
-def refresh(subtitles: List[Path], video: Optional[Path], target: Path, imdbid: Union[str, int]):
+def refresh(subtitles: List[Path], video: Optional[Path], target: Path, imdbid: Union[str, int]) -> None:
 	if target.parent.exists():
 		for entry in target.parent.iterdir():
 			if target.name in entry.name:

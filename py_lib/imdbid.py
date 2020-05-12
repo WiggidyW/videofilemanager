@@ -1,4 +1,4 @@
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Callable
 from constants import Constants
 from subtitle import Subtitle
 from pathlib import Path
@@ -58,6 +58,12 @@ class Imdbid:
 		except FileNotFoundError:
 			return []
 
+	def new_ost_subtitle(self, lang:str=Constants.OST_LANG, filtr:Callable[[dict], bool]=lambda filtr : True) -> Optional[Subtitle]:
+		return Subtitle.ost_new(self.imdbid, lang, filtr)
+
+	def import_subtitle(self, file:Path) -> Subtitle:
+		return Subtitle.new(file, self.imdbid)
+
 	## Video ##
 
 	@property
@@ -78,36 +84,36 @@ class Imdbid:
 	## OMDB ##
 
 	@property
-	def omdb(self):
+	def omdb(self) -> imdbid_db.Db:
 		try:
 			return self._omdb
 		except AttributeError:
 			refr = lambda refr : omdb.ByImdbid().refresh(refr, self.imdbid, Constants.OMDB_PLOT, Constants.OMDB_APIKEY)
-			self._omdb = imdbid_db.Db('Omdb', ('imdbID', self.imdbid), self.cursor, refr)
+			self._omdb: imdbid_db.Db = imdbid_db.Db('Omdb', ('imdbID', self.imdbid), self.cursor, refr)
 			return self._omdb
 
 	@property
-	def series_omdb(self):
+	def series_omdb(self) -> Optional[imdbid_db.Db]:
 		try:
 			return self._series_omdb
 		except AttributeError:
 			if self.omdb['type'] == 'episode':
-				refr = lambda refr : omdb.ByImdbid().refresh(refr, self.title_episode['seriesID'], Constants.OMDB_PLOT, Constants.OMDB_APIKEY)
-				self._series_omdb = imdbid_db.Db('Omdb', ('imdbID', self.title_episode['seriesID']), self.cursor, refr)
-				return self._series_omdb
-			else:
-				return None
+				if self.title_episode:
+					refr = lambda refr : omdb.ByImdbid().refresh(refr, self.title_episode['seriesID'], Constants.OMDB_PLOT, Constants.OMDB_APIKEY)
+					self._series_omdb: imdbid_db.Db = imdbid_db.Db('Omdb', ('imdbID', self.title_episode['seriesID']), self.cursor, refr)
+					return self._series_omdb
+			return None
 
 	## IMDB Datasets ##
 
 	@property
-	def title_episode(self):
+	def title_episode(self) -> Optional[imdbid_db.Db]:
 		try:
 			return self._title_episode
 		except AttributeError:
 			if self.omdb['type'] == 'episode':
 				refr = lambda refr : imdb_datasets.TitleEpisode().refresh(refr)
-				self._title_episode = imdbid_db.Db('ImdbDatasetTitleEpisode', ('imdbID', self.imdbid), self.cursor, refr)
+				self._title_episode: imdbid_db.Db = imdbid_db.Db('ImdbDatasetTitleEpisode', ('imdbID', self.imdbid), self.cursor, refr)
 				return self._title_episode
 			else:
 				return None
@@ -122,10 +128,13 @@ class Imdbid:
 			if self.omdb['type'] == 'movie':
 				self._plex_path: Path = Constants.PLEX_PATH / Constants.PLEX_MOVIE_DIR / '{} ({})'.format(self.omdb['title'], self.omdb['year'])
 			elif self.omdb['type'] == 'episode':
-				if self.title_episode['season']:
-					self._plex_path = Constants.PLEX_PATH / Constants.PLEX_TV_DIR / '{} ({})'.format(self.series_omdb['title'], self.series_omdb['year'][:4]) / 'Season {}'.format(self.title_episode['season'])
+				if self.title_episode and self.series_omdb:
+					if self.title_episode['season']:
+						self._plex_path = Constants.PLEX_PATH / Constants.PLEX_TV_DIR / '{} ({})'.format(self.series_omdb['title'], self.series_omdb['year'][:4]) / 'Season {}'.format(self.title_episode['season'])
+					else:
+						self._plex_path = Constants.PLEX_PATH / Constants.PLEX_TV_DIR / '{} ({})'.format(self.series_omdb['title'], self.series_omdb['year'][:4])
 				else:
-					self._plex_path = Constants.PLEX_PATH / Constants.PLEX_TV_DIR / '{} ({})'.format(self.series_omdb['title'], self.series_omdb['year'][:4])
+					return None
 			else:
 				return None
 			return self._plex_path
@@ -138,13 +147,18 @@ class Imdbid:
 			if self.omdb['type'] == 'movie':
 				self._plex_name: str = '{} ({})'.format(self.omdb['title'], self.omdb['year'])
 			elif self.omdb['type'] == 'episode':
-				if self.title_episode['season'] and self.title_episode['episode']:
-					self._plex_name = 'S{:02d}E{:02d}'.format(self.title_episode['season'], self.title_episode['episode'])
+				if self.title_episode and self.series_omdb:
+					if self.title_episode['season'] and self.title_episode['episode']:
+						self._plex_name = 'S{:02d}E{:02d}'.format(self.title_episode['season'], self.title_episode['episode'])
+					else:
+						self._plex_name = self.omdb['title']
 				else:
-					self._plex_name = self.omdb['title']
+					return None
 			else:
 				return None
 			return self._plex_name
 
-	def plex_refresh(self):
-		plex.refresh(self.subtitles, self.video, self.plex_path / self.plex_name, self.imdbid)
+	def plex_refresh(self) -> None:
+		if self.plex_path:
+			if self.plex_name:
+				plex.refresh(self.subtitles, self.video, self.plex_path / self.plex_name, self.imdbid)

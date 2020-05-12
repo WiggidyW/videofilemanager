@@ -1,7 +1,7 @@
+from typing import Union, Callable, Optional
 from constants import Constants
 from pathlib import Path
 from imdbid_db import Db
-from typing import Union, Callable
 import hashlib
 import sqlite3
 import shutil
@@ -19,12 +19,12 @@ class Subtitle(type(Path())): # type: ignore
 		self._init_metadata()
 		return self
 
-	def _init_metadata(self):
+	def _init_metadata(self) -> None:
 		SubtitleMetadata.insert(self.cursor, self.hash, self.imdbid)
 		Constants.CONN.commit()
 
 	@classmethod
-	def new(cls, sub:Path, imdbid:Union[int, str]):
+	def new(cls, sub:Path, imdbid:Union[int, str]) -> 'Subtitle':
 		target = Constants.MASTER_PATH / util.Imdbid.full(imdbid, Constants.IMDBID_DIGITS) / Constants.SUBTITLES_DIR
 		if target.exists():
 			new = cls.recursive_rename(target, sub)
@@ -37,17 +37,17 @@ class Subtitle(type(Path())): # type: ignore
 		return cls._new(target / sub.name)
 
 	@classmethod
-	def _ost_new(cls, path:Path, data:dict):
+	def _ost_new(cls, path:Path, data:dict) -> 'Subtitle':
 		self = cls._new(path)
 		self._init_ost_metadata(int(data['IDSubtitleFile']), data)
 		return self
 
-	def _init_ost_metadata(self, subid:int, data:dict):
+	def _init_ost_metadata(self, subid:int, data:dict) -> None:
 		OstMetadata.insert(self.cursor, self.hash, subid, data)
 		Constants.CONN.commit()
 
 	@classmethod
-	def ost_new(cls, imdbid:Union[int, str], lang:str=Constants.OST_LANG, filtr:Callable[[dict], bool]=lambda filtr : True):
+	def ost_new(cls, imdbid:Union[int, str], lang:str=Constants.OST_LANG, filtr:Callable[[dict], bool]=lambda filtr : True) -> Optional['Subtitle']:
 		data = ost.get_metadata(Constants.OST_AGENT, imdbid, lang)
 		target = Constants.MASTER_PATH / util.Imdbid.full(imdbid, Constants.IMDBID_DIGITS) / Constants.SUBTITLES_DIR
 		for entry in data:
@@ -63,6 +63,7 @@ class Subtitle(type(Path())): # type: ignore
 							target = target / entry['SubFileName']
 						ost.download(entry, target)
 						return cls._ost_new(target, entry)
+		return None
 
 	@staticmethod
 	def recursive_rename(directory:Path, file:Path) -> Path:
@@ -96,23 +97,23 @@ class Subtitle(type(Path())): # type: ignore
 			return self._cursor
 
 	@property
-	def metadata(self):
+	def metadata(self) -> Db:
 		try:
 			return self._metadata
 		except AttributeError:
 			refr = lambda refr : SubtitleMetadata.insert(refr, self.hash, self.imdbid)
-			self._metadata = Db('Subtitles', ('hash', self.hash), self.cursor, refr)
+			self._metadata: Db = Db('Subtitles', ('hash', self.hash), self.cursor, refr)
 			return self._metadata
 
 	@property
-	def ost(self):
+	def ost(self) -> Optional[Db]:
 		try:
 			return self._ost
 		except AttributeError:
 			refr = lambda refr : ()
 			db = Db('Ost', ('hash', self.hash), self.cursor, refr)
 			if db.exists():
-				self._ost = db
+				self._ost: Db = db
 				return self._ost
 			else:
 				return None

@@ -1,6 +1,6 @@
+from typing import List, IO, Union, Any
 from pathlib import Path
 from os import PathLike
-from typing import List, IO, Union, Any
 import tempfile
 import requests
 import zipfile
@@ -14,12 +14,12 @@ def get_metadata(agent:str, imdbid:Union[int, str], lang:str) -> List[dict]:
 	res.raise_for_status()
 	return json.loads(res.content)
 
-def download(metadata:dict, target:Path):
+def download(metadata:dict, target:Path) -> None:
 	res = requests.get(metadata['ZipDownloadLink'])
 	res.raise_for_status()
 	extract(metadata, target, io.BytesIO(res.content))
 
-def extract(metadata:dict, target:Path, file:IO[bytes]):
+def extract(metadata:dict, target:Path, file:IO[bytes]) -> None:
 	z = zipfile.Path(file)
 	files = find_files(z)
 	if not files:
@@ -37,7 +37,7 @@ def extract(metadata:dict, target:Path, file:IO[bytes]):
 				largest = (entry, len(entry.read_bytes()))
 		write(target, largest[0])
 
-def write(target:'PathLike[Any]', file:Union[Path, zipfile.Path]):
+def write(target:'PathLike[Any]', file:Union[Path, zipfile.Path]) -> None:
 	with open(target, 'wb') as f:
 		f.write(file.read_bytes())
 

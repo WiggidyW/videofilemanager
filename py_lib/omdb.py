@@ -41,7 +41,7 @@ class Metadata(ABC):
 class ByImdbid(Metadata):
 
 	@property
-	def url(self):
+	def url(self) -> str:
 		return "https://www.omdbapi.com/"
 
 	def parse(self, data:dict) -> list:
