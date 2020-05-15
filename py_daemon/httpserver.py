@@ -5,22 +5,25 @@ import util
 FLASK_PORT = 5000
 app = Flask(__name__)
 
+def run(host:str='0.0.0.0', port:int=5000):
+	app.run(host=host, port=port)
+
 @app.route('/vfm/subtitles')
 def subtitles():
 	try:
 		params = {}
 		for key in request.args:
 			params[key] = str(request.args[key])
-			result = subtitles_dispatch(params)
-			return str(result)
+		result = subtitles_dispatch(params)
+		return str(result)
 	except Exception as e:
 		return str(e)
 
-def run(host:str='0.0.0.0', port:int=5000):
-	app.run(host=host, port=port)
+def _ost_fetch(params:dict):
+	return ost_fetch(params)
 
 SUBTITLES_OPS = {
-	'ost-fetch': ost_fetch,
+	'ost-fetch': _ost_fetch,
 }
 
 def subtitles_dispatch(params:dict):
