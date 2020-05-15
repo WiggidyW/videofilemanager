@@ -1,11 +1,12 @@
 from flask import Flask, request
 from imdbid import Imdbid
 import util
+from constants import Constants
 
 FLASK_PORT = 5000
 app = Flask(__name__)
 
-def run(host:str='0.0.0.0', port:int=5000):
+def run(host:str=Constants.SERVER_IP, port:int=Constants.SERVER_PORT):
 	app.run(host=host, port=port)
 
 @app.route('/vfm/subtitles')

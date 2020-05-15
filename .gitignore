@@ -4,3 +4,4 @@ bin/*
 secrets.yml
 **/__pycache__
 **/.mypy_cache
+build

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from constants import Constants
 from typing import Union
-import requests
+import urllib.request
 import sqlite3
 import json
 import time
@@ -23,14 +23,9 @@ class Metadata(ABC):
 		raise NotImplementedError
 
 	def request(self, imdbid: Union[str, int], plot: str, apikey: str) -> bytes:
-		res = requests.get(self.url, params={
-			'apikey': apikey,
-			'plot': plot,
-			'r': 'json',
-			'i': util.Imdbid.full(imdbid, 8),
-		})
-		res.raise_for_status()
-		return res.content
+		url = '{}?apikey={}&r={}&plot={}&i={}'.format(self.url, apikey, 'json', plot, util.Imdbid.full(imdbid, 8))
+		res = urllib.request.urlopen(url)
+		return res.read()
 
 	def refresh(self, cursor:sqlite3.Cursor, imdbid: Union[str, int], plot: str, apikey: str) -> None:
 		data = json.loads(self.request(imdbid, plot, apikey))

@@ -25,6 +25,8 @@ class Constants:
 	_WATCHER_LOG = None
 	_OST_AGENT = None
 	_OST_LANG = None
+	_SERVER_IP = None
+	_SERVER_PORT = None
 
 	@classproperty
 	def CONN(cls):
@@ -129,3 +131,19 @@ class Constants:
 		else:
 			cls._OST_LANG = os.environ.get('OST_LANG')
 			return cls._OST_LANG
+
+	@classproperty
+	def SERVER_PORT(cls):
+		if cls._SERVER_PORT:
+			return cls._SERVER_PORT
+		else:
+			cls._SERVER_PORT = int(os.environ.get('SERVER_PORT'))
+			return cls._SERVER_PORT
+
+	@classproperty
+	def SERVER_IP(cls):
+		if cls._SERVER_IP:
+			return cls._SERVER_IP
+		else:
+			cls._SERVER_IP = os.environ.get('SERVER_IP')
+			return cls._SERVER_IP

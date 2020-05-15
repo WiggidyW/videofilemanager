@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from constants import Constants
 from typing import List
-import requests
+import urllib.request
 import sqlite3
 import gzip
 import csv
@@ -23,9 +23,8 @@ class Metadata(ABC):
 		raise NotImplementedError
 
 	def request(self) -> bytes:
-		res = requests.get(self.url)
-		res.raise_for_status()
-		return res.content
+		res = urllib.request.urlopen(self.url)
+		return res.read()
 
 	def refresh(self, cursor:sqlite3.Cursor) -> None:
 		with gzip.open(io.BytesIO(self.request()), 'rt') as f:

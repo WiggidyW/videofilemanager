@@ -1,8 +1,8 @@
 from typing import List, IO, Union, Any
 from pathlib import Path
 from os import PathLike
+import urllib.request
 import tempfile
-import requests
 import zipfile
 import util
 import json
@@ -10,14 +10,12 @@ import io
 
 def get_metadata(agent:str, imdbid:Union[int, str], lang:str) -> List[dict]:
 	url = 'https://rest.opensubtitles.org/search/imdbid-{}/sublanguageid-{}/'.format(int(util.Imdbid.digits(imdbid, 0)), lang)
-	res = requests.get(url, headers={'User-Agent': agent})
-	res.raise_for_status()
-	return json.loads(res.content)
+	res = urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': agent}))
+	return json.loads(res.read())
 
 def download(metadata:dict, target:Path) -> None:
-	res = requests.get(metadata['ZipDownloadLink'])
-	res.raise_for_status()
-	extract(metadata, target, io.BytesIO(res.content))
+	res = urllib.request.urlopen(metadata['ZipDownloadLink'])
+	extract(metadata, target, io.BytesIO(res.read()))
 
 def extract(metadata:dict, target:Path, file:IO[bytes]) -> None:
 	z = zipfile.Path(file)
