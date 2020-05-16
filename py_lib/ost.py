@@ -1,6 +1,5 @@
 from typing import List, IO, Union, Any
 from pathlib import Path
-from os import PathLike
 import urllib.request
 import tempfile
 import zipfile
@@ -18,8 +17,10 @@ def download(metadata:dict, target:Path) -> None:
 	extract(metadata, target, io.BytesIO(res.read()))
 
 def extract(metadata:dict, target:Path, file:IO[bytes]) -> None:
-	z = zipfile.Path(file)
-	files = find_files(z)
+	tmp = tempfile.TemporaryDirectory()
+	z = zipfile.ZipFile(file)
+	z.extractall(path=tmp.name)
+	files = find_files(Path(tmp.name))
 	if not files:
 		raise Exception('invalid subtitle')
 	if len(files) == 1:
@@ -35,11 +36,11 @@ def extract(metadata:dict, target:Path, file:IO[bytes]) -> None:
 				largest = (entry, len(entry.read_bytes()))
 		write(target, largest[0])
 
-def write(target:'PathLike[Any]', file:Union[Path, zipfile.Path]) -> None:
+def write(target:Path, file:Path) -> None:
 	with open(target, 'wb') as f:
 		f.write(file.read_bytes())
 
-def find_files(path:Union[Path, zipfile.Path]) -> List[Union[Path, zipfile.Path]]:
+def find_files(path:Path) -> List[Path]:
 	if path.is_file():
 		return [path]
 	files = []

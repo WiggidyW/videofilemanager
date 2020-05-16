@@ -33,7 +33,7 @@ class Constants:
 		if cls._CONN:
 			return cls._CONN
 		else:
-			cls._CONN = sqlite3.connect(os.environ.get('DB_PATH'))
+			cls._CONN = sqlite3.connect(os.environ['DB_PATH'])
 			return cls._CONN
 
 	@classproperty
@@ -41,7 +41,7 @@ class Constants:
 		if cls._MASTER_PATH:
 			return cls._MASTER_PATH
 		else:
-			cls._MASTER_PATH = Path(os.environ.get('MASTER_PATH'))
+			cls._MASTER_PATH = Path(os.environ['MASTER_PATH'])
 			return cls._MASTER_PATH
 
 	@classproperty
@@ -49,7 +49,7 @@ class Constants:
 		if cls._SUBTITLES_DIR:
 			return cls._SUBTITLES_DIR
 		else:
-			cls._SUBTITLES_DIR = os.environ.get('SUBTITLES_DIR')
+			cls._SUBTITLES_DIR = os.environ['SUBTITLES_DIR']
 			return cls._SUBTITLES_DIR
 
 	@classproperty
@@ -57,7 +57,7 @@ class Constants:
 		if cls._VIDEO_DIR:
 			return cls._VIDEO_DIR
 		else:
-			cls._VIDEO_DIR = os.environ.get('VIDEO_DIR')
+			cls._VIDEO_DIR = os.environ['VIDEO_DIR']
 			return cls._VIDEO_DIR
 
 	@classproperty
@@ -65,7 +65,7 @@ class Constants:
 		if cls._PLEX_PATH:
 			return cls._PLEX_PATH
 		else:
-			cls._PLEX_PATH = Path(os.environ.get('PLEX_PATH'))
+			cls._PLEX_PATH = Path(os.environ['PLEX_PATH'])
 			return cls._PLEX_PATH
 
 	@classproperty
@@ -73,7 +73,7 @@ class Constants:
 		if cls._PLEX_MOVIE_DIR:
 			return cls._PLEX_MOVIE_DIR
 		else:
-			cls._PLEX_MOVIE_DIR = os.environ.get('PLEX_MOVIE_DIR')
+			cls._PLEX_MOVIE_DIR = os.environ['PLEX_MOVIE_DIR']
 			return cls._PLEX_MOVIE_DIR
 
 	@classproperty
@@ -81,7 +81,7 @@ class Constants:
 		if cls._PLEX_TV_DIR:
 			return cls._PLEX_TV_DIR
 		else:
-			cls._PLEX_TV_DIR = os.environ.get('PLEX_TV_DIR')
+			cls._PLEX_TV_DIR = os.environ['PLEX_TV_DIR']
 			return cls._PLEX_TV_DIR
 
 	@classproperty
@@ -89,7 +89,7 @@ class Constants:
 		if cls._OMDB_PLOT:
 			return cls._OMDB_PLOT
 		else:
-			cls._OMDB_PLOT = os.environ.get('OMDB_PLOT')
+			cls._OMDB_PLOT = os.environ['OMDB_PLOT']
 			return cls._OMDB_PLOT
 
 	@classproperty
@@ -97,7 +97,7 @@ class Constants:
 		if cls._OMDB_APIKEY:
 			return cls._OMDB_APIKEY
 		else:
-			cls._OMDB_APIKEY = os.environ.get('OMDB_APIKEY')
+			cls._OMDB_APIKEY = os.environ['OMDB_APIKEY']
 			return cls._OMDB_APIKEY
 
 	@classproperty
@@ -105,7 +105,7 @@ class Constants:
 		if cls._IMDBID_DIGITS:
 			return cls._IMDBID_DIGITS
 		else:
-			cls._IMDBID_DIGITS = int(os.environ.get('IMDBID_DIGITS'))
+			cls._IMDBID_DIGITS = int(os.environ['IMDBID_DIGITS'])
 			return cls._IMDBID_DIGITS
 
 	@classproperty
@@ -113,7 +113,7 @@ class Constants:
 		if cls._WATCHER_LOG:
 			return cls._WATCHER_LOG
 		else:
-			cls._WATCHER_LOG = Path(os.environ.get('WATCHER_LOG'))
+			cls._WATCHER_LOG = Path(os.environ['WATCHER_LOG'])
 			return cls._WATCHER_LOG
 
 	@classproperty
@@ -121,7 +121,7 @@ class Constants:
 		if cls._OST_AGENT:
 			return cls._OST_AGENT
 		else:
-			cls._OST_AGENT = os.environ.get('OST_AGENT')
+			cls._OST_AGENT = os.environ['OST_AGENT']
 			return cls._OST_AGENT
 
 	@classproperty
@@ -129,7 +129,7 @@ class Constants:
 		if cls._OST_LANG:
 			return cls._OST_LANG
 		else:
-			cls._OST_LANG = os.environ.get('OST_LANG')
+			cls._OST_LANG = os.environ['OST_LANG']
 			return cls._OST_LANG
 
 	@classproperty
@@ -137,7 +137,7 @@ class Constants:
 		if cls._SERVER_PORT:
 			return cls._SERVER_PORT
 		else:
-			cls._SERVER_PORT = int(os.environ.get('SERVER_PORT'))
+			cls._SERVER_PORT = int(os.environ['SERVER_PORT'])
 			return cls._SERVER_PORT
 
 	@classproperty
@@ -145,5 +145,5 @@ class Constants:
 		if cls._SERVER_IP:
 			return cls._SERVER_IP
 		else:
-			cls._SERVER_IP = os.environ.get('SERVER_IP')
+			cls._SERVER_IP = os.environ['SERVER_IP']
 			return cls._SERVER_IP

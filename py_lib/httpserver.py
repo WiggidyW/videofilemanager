@@ -1,9 +1,8 @@
 from flask import Flask, request
+from constants import Constants
 from imdbid import Imdbid
 import util
-from constants import Constants
 
-FLASK_PORT = 5000
 app = Flask(__name__)
 
 def run(host:str=Constants.SERVER_IP, port:int=Constants.SERVER_PORT):
@@ -41,7 +40,6 @@ def ost_fetch(params:dict):
 	except Exception as e:
 		return str(e)
 	imdbid = Imdbid(params['imdbid'])
-	result = []
 	for i in range(int(params['count'])):
 		try:
 			sub = imdbid.new_ost_subtitle(params['lang'])

@@ -90,13 +90,16 @@ def make_exe(dist):
 
         # Do not include functionality for testing Python itself.
         include_test=False,
+
+        # https://github.com/indygreg/PyOxidizer/issues/241
+        resources_policy="prefer-in-memory-fallback-filesystem-relative:lib"
     )
 
     # Invoke `pip install` with our Python distribution to install a single package.
     # `pip_install()` returns objects representing installed files.
     # `add_in_memory_python_resources()` adds these objects to the binary,
     # marking them for in-memory loading.
-    exe.add_in_memory_python_resources(dist.pip_install(["watchdog"]))
+    exe.add_filesystem_relative_python_resources("lib", dist.pip_install(["watchdog", "pyyaml", "flask"]))
 
     # Invoke `pip install` using a requirements file and add the collected resources
     # to our binary.

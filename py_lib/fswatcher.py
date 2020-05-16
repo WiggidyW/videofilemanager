@@ -1,4 +1,4 @@
-from watchdog import events, observers
+from watchdog import events, observers #type:ignore
 from constants import Constants
 from imdbid import Imdbid
 from pathlib import Path
