@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-compression = { version = "^0.3", default-features = false, features = ["stream", "gzip"] }
+async-compression = { version = "^0.3", default-features = false, features = ["gzip", "stream"] }
 reqwest = { version = "^0.10", default-features = false, features = ["rustls-tls", "stream"] }
 tokio = { version = "^0.2", features = ["full"] }
 futures-core = { version = "^0.3" }
