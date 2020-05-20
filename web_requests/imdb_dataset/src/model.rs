@@ -9,14 +9,6 @@ pub enum Dataset {
 }
 
 impl Dataset {
-	// async fn request(&self) -> Result<Response, reqwest::Error> {
-	// 	Ok(Response(
-	// 		reqwest::get(self.url())
-	// 			.await?
-	// 			.error_for_status()?,
-	// 	))
-	// }
-
 	#[cfg(not(test))]
 	fn url(&self) -> &'static str {
 		match self {
@@ -46,12 +38,12 @@ impl Dataset {
 }
 
 pub struct NameBasics {
-	nameID: usize,
+	name_id: usize,
 	name: String,
-	birthYear: Option<usize>,
-	deathYear: Option<usize>,
-	primaryProfession: Option<Vec<String>>,
-	imdbIDs: Option<Vec<usize>>,
+	birth_year: Option<usize>,
+	death_year: Option<usize>,
+	primary_profession: Option<Vec<String>>,
+	imdb_ids: Option<Vec<usize>>,
 }
 
 pub struct TitleAkas {}
