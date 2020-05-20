@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+server ImdbDataset {
+	rpc TitleAkas (TitleAkasGet) returns (stream TitleAkasRow);
+	rpc TitleBasics (TitleBasicsGet) returns (stream TitleBasicsRow);
+	rpc TitleCrew (TitleCrewGet) returns (stream TitleCrewRow);
+	rpc TitleEpisode (TitleEpisodeGet) returns (stream TitleEpisodeRow);
+	rpc TitlePrincipals (TitlePrincipalsGet) returns (stream TitlePrincipalsRow);
+	rpc TitleRatings (TitleRatingsGet) returns (stream TitleRatingsRow);
+}
