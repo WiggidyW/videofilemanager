@@ -1,15 +1,16 @@
 #![allow(dead_code)]
-// use futures_util::{
-// 	// stream::StreamExt,
-// 	task::{Poll, Context},
-// };
-// use futures_core::{self, stream::Stream};
-// use std::{
-// 	io,
-// 	pin::Pin,
-// };
-// use async_compression::stream::GzipDecoder;
-// use bytes::Bytes;
+#![allow(unused_variables)]
+
+const CSV_DELIMITER: u8 = b'\t';
+const CSV_TERMINATOR: u8 = b'\n';
+
+mod core;
+
+pub(crate) mod deser;
+
+pub(crate) mod model;
+
+pub mod error;
 
 // #[cfg(test)]
 // mod tests {
@@ -38,5 +39,3 @@
 // 		}
 // 	}
 // }
-
-mod core;
