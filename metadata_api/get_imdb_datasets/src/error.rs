@@ -1,0 +1,1 @@
+pub const ERR_REQWEST_TO_IO: std::io::ErrorKind = std::io::ErrorKind::TimedOut;

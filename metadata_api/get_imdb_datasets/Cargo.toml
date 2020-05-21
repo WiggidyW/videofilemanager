@@ -1,0 +1,14 @@
+[package]
+name = "get_imdb_datasets"
+version = "0.1.0"
+authors = ["WiggidyW <rlr0017@auburn.edu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reqwest = { version = "^0.10", default-features = false, features = ["stream", "rustls-tls"] }
+async-compression = { version = "^0.3", default-features = false, features = ["stream", "gzip"] }
+futures-core = { version = "^0.3" }
+bytes = { version = "^0.5" }
+derive_more = { version = "^0" }
