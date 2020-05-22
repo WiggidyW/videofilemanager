@@ -1,8 +1,16 @@
+use futures_core::{stream::Stream, task::{Poll, Context}};
+use std::{marker::{Unpin, PhantomData}, pin::Pin, iter::Iterator};
 use async_compression::stream::GzipDecoder;
 use bytes::{Bytes, BytesMut, buf::BufMut};
-use futures_core::{stream::Stream, task::{Poll, Context}};
-use std::{marker::{Unpin, PhantomData}, pin::Pin, ops::{Deref, DerefMut}};
+use crate::error::Error;
 use derive_more::*;
+
+pub trait Dataset: Sized + Unpin {
+	type Error: std::error::Error + 'static;
+	type Url: reqwest::IntoUrl;
+	fn url() -> Self::Url;
+	fn deserialize(b: Bytes) -> Result<Vec<Self>, Self::Error>;
+}
 
 pub async fn request<D: Dataset>() -> Result<Response<D>, reqwest::Error> {
 	Ok(Response::new(
@@ -12,25 +20,20 @@ pub async fn request<D: Dataset>() -> Result<Response<D>, reqwest::Error> {
 	))
 }
 
-pub trait Dataset: Sized {
-	type Error;
-	type Url: reqwest::IntoUrl;
-	fn url() -> Self::Url;
-	fn deserialize(b: Bytes) -> Result<Vec<Self>, Self::Error>;
-}
-
 pub struct Response<D> {
 	inner: reqwest::Response,
 	kind: PhantomData<D>,
 }
 
+#[derive(Deref, DerefMut)]
 pub struct RawByteStream {
-	inner: Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>,
+	inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>>>>,
 }
 
-#[derive(Deref)]
+#[derive(Deref, DerefMut)]
 pub struct RecordStream<D> {
 	#[deref]
+	#[deref_mut]
 	inner: GzipDecoder<RawByteStream>,
 	kind: PhantomData<D>,
 	buf: BytesMut,
@@ -56,20 +59,20 @@ impl RawByteStream {
 		S: 'static,
 	{
 		Self {
-			inner: Box::new(inner),
+			inner: Box::pin(inner),
 		}
 	}
 }
 
 impl Stream for RawByteStream {
 	type Item = Result<Bytes, std::io::Error>;
-	#[allow(unconditional_recursion)] // This warning is due to a bug.
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-		match futures_core::ready!(self.as_mut().poll_next(cx)) {
+		// Through sheer magic, (&mut **self).as_mut() is a Pin<&mut dyn Stream>. No box.
+		match futures_core::ready!((&mut **self).as_mut().poll_next(cx)) {
 			None => Poll::Ready(None),
 			Some(Err(e)) =>
 				Poll::Ready(Some(Err(
-					std::io::Error::new(crate::error::ERR_REQWEST_TO_IO, e)
+					std::io::Error::new(std::io::ErrorKind::Other, e)
 				))),
 			Some(Ok(chunk)) => Poll::Ready(Some(Ok(chunk))),
 		}
@@ -86,39 +89,56 @@ impl<D> RecordStream<D> {
 		}
 	}
 
-	// - Returns Bytes following the first terminator in the buffer.
-	// - Clears the buffer.
-	// - Sets init to true.
-	fn split_first_terminator(&mut self) -> BytesMut {
-		unimplemented!()
+	// - Mutates the buffer, splitting off the first row.
+	fn split_first_terminator(&mut self) {
+		let iter = (&self.buf)
+			.into_iter()
+			.enumerate();
+		for (i, b) in iter {
+			if b == crate::CSV_TERM {
+				let _ = self.buf.split_to(i);
+				break;
+			}
+		}
 	}
 
-	// - Returns Bytes preceding the final terminator in the buffer.
-	// - Splits the buffer.
+	// - Mutates the buffer, splitting off all but the final row.
+	// - Returns those bytes.
 	fn split_last_terminator(&mut self) -> BytesMut {
-		unimplemented!()
+		let mut i = self.buf.len() - 1;
+		loop {
+			match self.buf.get(i) {
+				Some(b) if b == crate::CSV_TERM =>
+					return self.buf.split_to(i + 1),
+				None => break,
+				_ => i -= 1,
+			}
+		}
+		self.buf.split() // theoretically impossible to reach
 	}
 
 	fn parse(&mut self, b: Bytes) -> Bytes {
 		self.buf.put(b);
-		match self.init {
-			false => self.split_first_terminator()
-				.freeze(),
-			true => self.split_last_terminator()
-				.freeze(),
+		if !self.init {
+			self.split_first_terminator();
+			self.init = true;
 		}
+		self.split_last_terminator()
+			.freeze()
 	}
 }
 
-// impl<D: Dataset> Stream for RecordStream<D> {
-// 	type Item = Result<Vec<D>, std::io::Error>;
-// 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-// 		match futures_core::ready!(self.as_mut().poll_next(cx)) {
-// 			None => Poll::Ready(None),
-// 			Some(Err(e)) => unimplemented!(),
-// 			Some(Ok(chunk)) =>
-// 		match 
-// 		}
-// 		unimplemented!()
-// 	}
-// }
+impl<D: Dataset> Stream for RecordStream<D> {
+	type Item = Result<Vec<D>, Error>;
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+		// **self resolves to inner GzipDecoder
+		match futures_core::ready!(Pin::new(&mut **self).poll_next(cx)) {
+			None => Poll::Ready(None),
+			Some(Err(e)) => Poll::Ready(Some(Err(Error::stream_error(e)))),
+			Some(Ok(chunk)) =>
+		match D::deserialize(self.parse(chunk)) {
+			Ok(rows) => Poll::Ready(Some(Ok(rows))),
+			Err(e) => Poll::Ready(Some(Err(Error::deser_error(e)))),
+		},}
+	}
+}

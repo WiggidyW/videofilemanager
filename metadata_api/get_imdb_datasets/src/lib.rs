@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
-// #[macro_use]
-// extern crate derive_more;
 
-pub(crate) mod error;
+pub(crate) const CSV_TERM: &'static u8 = &b'\t';
+
+pub mod error;
 
 pub(crate) mod model;
