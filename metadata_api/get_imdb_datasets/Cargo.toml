@@ -12,3 +12,4 @@ async-compression = { version = "^0.3", default-features = false, features = ["s
 futures-core = { version = "^0.3" }
 bytes = { version = "^0.5" }
 derive_more = { version = "^0" }
+serde = { version = "^1.0", features = ["serde_derive"] }
