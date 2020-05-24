@@ -96,14 +96,6 @@ macro_rules! url {
 	}
 }
 
-url!(TitleRatings, "https://datasets.imdbws.com/title.ratings.tsv.gz");
-url!(TitleEpisode, "https://datasets.imdbws.com/title.episode.tsv.gz");
-url!(TitleCrew, "https://datasets.imdbws.com/title.crew.tsv.gz");
-url!(TitleBasics, "https://datasets.imdbws.com/title.basics.tsv.gz");
-url!(TitleAkas, "https://datasets.imdbws.com/title.akas.tsv.gz");
-url!(NameBasics, "https://datasets.imdbws.com/name.basics.tsv.gz");
-url!(TitlePrincipals,"https://datasets.imdbws.com/title.principals.tsv.gz");
-
 pub struct Response<T> {
 	inner: reqwest::blocking::Response,
 	kind: std::marker::PhantomData<T>,
@@ -123,3 +115,25 @@ where
 			.into_deserialize()
 	}
 }
+
+#[cfg(not(test))]
+const _: () = {
+	url!(TitleRatings, "https://datasets.imdbws.com/title.ratings.tsv.gz");
+	url!(TitleEpisode, "https://datasets.imdbws.com/title.episode.tsv.gz");
+	url!(TitleCrew, "https://datasets.imdbws.com/title.crew.tsv.gz");
+	url!(TitleBasics, "https://datasets.imdbws.com/title.basics.tsv.gz");
+	url!(TitleAkas, "https://datasets.imdbws.com/title.akas.tsv.gz");
+	url!(NameBasics, "https://datasets.imdbws.com/name.basics.tsv.gz");
+	url!(TitlePrincipals, "https://datasets.imdbws.com/title.principals.tsv.gz");
+};
+
+#[cfg(test)]
+const _: () = {
+	url!(TitleRatings, "http://localhost:12794/imdb-datasets/title.ratings.tsv.gz");
+	url!(TitleEpisode, "http://localhost:12794/imdb-datasets/title.episode.tsv.gz");
+	url!(TitleCrew, "http://localhost:12794/imdb-datasets/title.crew.tsv.gz");
+	url!(TitleBasics, "http://localhost:12794/imdb-datasets/title.basics.tsv.gz");
+	url!(TitleAkas, "http://localhost:12794/imdb-datasets/title.akas.tsv.gz");
+	url!(NameBasics, "http://localhost:12794/imdb-datasets/name.basics.tsv.gz");
+	url!(TitlePrincipals, "http://localhost:12794/imdb-datasets/title.principals.tsv.gz");
+};
