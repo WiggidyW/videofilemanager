@@ -1,25 +1,43 @@
-pub(crate) const ERR_REQWEST_TO_IO: std::io::ErrorKind = std::io::ErrorKind::TimedOut;
+use derive_more::From;
+use either::Either;
 
+#[derive(Debug, From)]
 pub enum Error {
-    RequestError(reqwest::Error),
-    DecoderError(Box<dyn std::error::Error>),
-    GzipError(std::io::Error),
-    DeserializeError(Box<dyn std::error::Error>),
+	RequestError(reqwest::Error),
+	DeserializeError(csv::Error),
+	ThreadError(crossbeam::crossbeam_channel::RecvError),
+	#[from(ignore)]
+	WriteError(Box<dyn std::error::Error + Send + 'static>),
+	#[from(ignore)]
+	GetTimestampError(Box<dyn std::error::Error + Send>),
+	#[from(ignore)]
+	SetTimestampError(Box<dyn std::error::Error + Send>),
+	HeaderNotFoundError,
+	InvalidHeaderError(Either<reqwest::header::ToStrError, chrono::format::ParseError>),
+}
+
+impl From<reqwest::header::ToStrError> for Error {
+	fn from(value: reqwest::header::ToStrError) -> Self {
+		Self::InvalidHeaderError(Either::Left(value))
+	}
+}
+
+impl From<chrono::format::ParseError> for Error {
+	fn from(value: chrono::format::ParseError) -> Self {
+		Self::InvalidHeaderError(Either::Right(value))
+	}
 }
 
 impl Error {
-    pub(crate) fn request_error(error: reqwest::Error) -> Self {
-        Self::RequestError(error)
-    }
+	pub fn write_error(err: impl std::error::Error + Send + 'static) -> Self {
+		Self::WriteError(Box::new(err))
+	}
 
-    pub(crate) fn stream_error(error: std::io::Error) -> Self {
-        match error.kind() {
-            ERR_REQWEST_TO_IO => Self::DecoderError(error.into_inner().unwrap()),
-            _ => Self::GzipError(error),
-        }
-    }
+	pub fn get_timestamp_error(err: impl std::error::Error + Send + 'static) -> Self {
+		Self::GetTimestampError(Box::new(err))
+	}
 
-    pub(crate) fn deser_error(error: impl std::error::Error + 'static) -> Self {
-        Self::DeserializeError(Box::new(error))
-    }
+	pub fn set_timestamp_error(err: impl std::error::Error + Send + 'static) -> Self {
+		Self::SetTimestampError(Box::new(err))
+	}
 }
