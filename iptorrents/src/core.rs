@@ -22,16 +22,16 @@ struct TorrentFilesElement {
 }
 
 pub struct Torrent {
-	Name: String,
-	Torrent: String,
-	Id: u32,
-	Type: String,
-	FileCount: u32,
-	Snatches: u32,
-	Leechers: u32,
-	Seeders: u32,
-	Size: u64, // in bytes
-	Files: Vec<(String, u64)>, // (file name, byte size)
+	name: String,
+	torrent: String,
+	id: u32,
+	category: String,
+	file_count: u32,
+	snatches: u32,
+	leechers: u32,
+	seeders: u32,
+	size: u64, // in bytes
+	files: Vec<(String, u64)>, // (file name, byte size)
 }
 
 impl Requestor {
