@@ -1,3 +1,4 @@
 fn main() {
-    println!("Hello World!");
+	// iptorrents::test1();
+	iptorrents::test2();
 }
