@@ -8,6 +8,7 @@ use crate::{Error, HtmlError, request::Request};
 pub trait Requestor {
 	type Error: StdError + 'static;
 	fn request(&self, url: &str, cookie: &str) -> Result<String, Self::Error>;
+	fn request_bytes(&self, url: &str, cookie: &str) -> Result<Vec<u8>, Self::Error>;
 }
 
 pub trait Cache {
@@ -93,6 +94,10 @@ where
 		}
 	}
 
+	pub fn get_torrent(&self, req: &Torrent) -> Result<Vec<u8>, Error> {
+		self.request_bytes(&req.url())
+	}
+
 	pub fn get_results(&self, req: Request) -> Result<Vec<Torrent>, Error> {
 		let mut res = self.request(&req.url(1))?;
 		let final_page = min(res.num_pages().unwrap_or(1), self.max_pages);
@@ -164,6 +169,12 @@ where
 			}
 		}
 	}
+
+	fn request_bytes(&self, url: &str) -> Result<Vec<u8>, Error> {
+		self.req
+			.request_bytes(url, &self.cookie)
+			.map_err(|e| Error::RequestError(Box::new(e)))
+	}
 }
 
 impl Torrent {
@@ -189,6 +200,10 @@ impl Torrent {
 				.map(|tf| (tf.title, tf.size))
 				.collect(),
 		}
+	}
+
+	fn url(&self) -> String {
+		format!("https://www.iptorrents.com/download.php/{}/{}", self.id, self.torrent_title)
 	}
 }
 
@@ -242,7 +257,7 @@ impl Response {
 
 impl TorrentInfo {
 	fn files_url(&self) -> String {
-		unimplemented!()
+		format!("https://www.iptorrents.com/t/{}/files", self.id)
 	}
 }
 
