@@ -1,4 +1,4 @@
-use std::{ops::Index, time::Duration, error::Error as StdError, thread::sleep, convert::TryFrom, cmp::min, iter::Sum};
+use std::{ops::Index, error::Error as StdError, convert::TryFrom, cmp::min, iter::Sum};
 use scraper::{Html, Selector, element_ref::ElementRef};
 use bincode::{serialize, deserialize};
 use serde::{Serialize, Deserialize};
@@ -17,13 +17,13 @@ pub trait Cache {
 }
 
 #[derive(Debug)]
-pub struct Operator<R, C> {
+pub struct Operator<R, C, F> {
 	req: R,
 	cache: C,
 	cookie: String,
 	max_pages: usize,
 	max_torrents: usize,
-	req_interval: Duration,
+	sleep: F,
 }
 
 pub struct Torrent {
@@ -69,10 +69,11 @@ struct TorrentFile {
 	size: u64,
 }
 
-impl<R, C> Operator<R, C>
+impl<R, C, F> Operator<R, C, F>
 where
 	R: Requestor + Sized,
 	C: Cache + Sized,
+	F: Fn(),
 {
 	pub fn new(
 		req: R,
@@ -80,7 +81,7 @@ where
 		cookie: String,
 		max_pages: usize,
 		max_torrents: usize,
-		req_interval: Duration) -> Self
+		sleep: F) -> Self
 	{
 		Self {
 			req: req,
@@ -88,7 +89,7 @@ where
 			cookie: cookie,
 			max_pages: max_pages,
 			max_torrents: max_torrents,
-			req_interval: req_interval,
+			sleep: sleep,
 		}
 	}
 
@@ -146,7 +147,7 @@ where
 	fn request(&self, url: &str) -> Result<Response, Error> {
 		let res = self.req
 			.request(url, &self.cookie);
-		sleep(self.req_interval);
+		(self.sleep)();
 		match res {
 			Err(e) => {
 				let e = Box::new(e);
