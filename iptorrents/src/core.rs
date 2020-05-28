@@ -93,7 +93,7 @@ where
 		}
 	}
 
-	pub fn get(&self, req: Request) -> Result<Vec<Torrent>, Error> {
+	pub fn get_results(&self, req: Request) -> Result<Vec<Torrent>, Error> {
 		let mut res = self.request(&req.url(1))?;
 		let final_page = min(res.num_pages().unwrap_or(1), self.max_pages);
 		// Get the torrents
