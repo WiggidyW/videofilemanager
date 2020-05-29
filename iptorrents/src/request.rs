@@ -1,21 +1,43 @@
 use std::collections::HashSet;
-
-const URL: &'static str = "https://www.iptorrents.com/";
+use crate::response::TorrentInfo;
 
 #[derive(Debug)]
-pub struct Request {
-    pub categories: HashSet<Category>,
+pub struct SearchRequest {
     pub search: String,
+    pub page: usize,
     pub order: Option<Order>,
+    pub categories: HashSet<Category>,
 }
 
-impl Request {
+#[derive(Debug)]
+pub struct FileInfoRequest {
+    pub id: u32,
+}
+
+#[derive(Debug)]
+pub struct TorrentRequest {
+    pub filename: String,
+    pub id: u32,
+}
+
+impl SearchRequest {
     pub fn new(search: String) -> Self {
         Self {
-            categories: HashSet::new(),
             search: search,
+            page: 1,
             order: None,
+            categories: HashSet::new(),
         }
+    }
+
+    pub fn with_search(mut self, search: String) -> Self {
+        self.search = search;
+        self
+    }
+
+    pub fn with_page(mut self, page: usize) -> Self {
+        self.page = page;
+        self
     }
 
     pub fn with_order(mut self, order: Order) -> Self {
@@ -30,12 +52,11 @@ impl Request {
         self
     }
 
-    pub fn url(&self, page: usize) -> String {
-        let mut url = format!("{}t?{}&q={};p={}",
-            URL,
+    pub fn url(&self) -> String {
+        let mut url = format!("https://www.iptorrents.com/t?{}&q={};p={}",
             self.category_string(),
             &self.search,
-            page,
+            self.page,
         );
         if let Some(o) = self.order {
             url.push_str(";");
@@ -56,6 +77,69 @@ impl Request {
                 }
             });
         s
+    }
+}
+
+impl FileInfoRequest {
+    pub fn new(id: u32) -> Self {
+        Self {
+            id: id,
+        }
+    }
+
+    pub fn with_id(mut self, id: u32) -> Self {
+        self.id = id;
+        self
+    }
+
+    pub fn url(&self) -> String {
+        format!("https://www.iptorrents.com/t/{}/files",
+            self.id,
+        )
+    }
+}
+
+impl From<&TorrentInfo> for FileInfoRequest {
+    fn from(value: &TorrentInfo) -> Self {
+        Self {
+            id: value.id,
+        }
+    }
+}
+
+impl TorrentRequest {
+    pub fn new(filename: String, id: u32) -> Self {
+        Self {
+            filename: filename,
+            id: id,
+        }
+    }
+
+    pub fn with_filename(mut self, filename: String) -> Self {
+        self.filename = filename;
+        self
+    }
+
+    pub fn with_id(mut self, id: u32) -> Self {
+        self.id = id;
+        self
+    }
+
+    pub fn url(&self) -> String {
+        format!("https://www.iptorrents.com/download.php/{}/{}",
+            self.id,
+            self.filename,
+        )
+    }
+}
+
+impl From<&TorrentInfo> for TorrentRequest {
+    fn from(value: &TorrentInfo) -> Self {
+        Self {
+            filename: value.torrent_title
+                .to_string(),
+            id: value.id,
+        }
     }
 }
 
