@@ -3,6 +3,7 @@ use std::error::Error as StdError;
 #[derive(Debug)]
 pub enum Error {
 	RequestError(Box<dyn StdError>),
+	FileStreamError(std::io::Error),
 	ParseError(std::io::Error),
 	CookieError(String),
 	HtmlError(HtmlError),
