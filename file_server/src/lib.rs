@@ -1,3 +1,5 @@
+pub type StreamHash = std::rc::Rc<str>;
+
 mod cache;
 mod file_map;
 pub mod core;

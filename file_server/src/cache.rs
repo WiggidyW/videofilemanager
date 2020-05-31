@@ -1,13 +1,14 @@
-// pub use memory_cache::Cache as MemoryCache;
+pub use memory_cache::Cache as MemoryCache;
+
+use crate::StreamHash;
 
 pub trait Cache {
     type Error: std::error::Error + 'static;
-    type Hashes: AsRef<[String]>;
     fn get(
         &mut self,
         key: u32,
-    ) -> Result<Option<(Self::Hashes, u64)>, Self::Error>;
-    fn set<T: AsRef<[String]>>(
+    ) -> Result<Option<(Vec<StreamHash>, u64)>, Self::Error>;
+    fn set<T: AsRef<[StreamHash]>>(
         &mut self,
         key: u32,
         hashes: T,
@@ -19,12 +20,20 @@ pub trait Cache {
     ) -> Result<(), Self::Error>;
 }
 
-// mod memory_cache {
-//     use std::{rc::Rc, ops::Deref, collections::HashMap, convert::Infallible, marker::PhantomData};
-//     use super::Cache as CacheTrait;
+mod memory_cache {
+    use std::{rc::Rc, ops::Deref, collections::HashMap, convert::Infallible, marker::PhantomData};
+    use super::Cache as CacheTrait;
 
-//     pub struct Cache {
-//         inner: HashMap<u32, (Vec<String>, u64)>,
+    pub struct Cache {
+        inner: HashMap<u32, (Vec<Rc<String>>, u64)>,
+    }
+
+//     pub struct Hash([Rc<String>]);
+
+//     impl AsRef<[String]> for Hash {
+//         fn as_ref(&self) -> &[String] {
+//             self.0.as_ref()
+//         }
 //     }
 
 //     // impl<'c> Deref for Cache<'c> {
@@ -91,4 +100,4 @@ pub trait Cache {
 //             Ok(())
 //         }
 //     }
-// }
+}
