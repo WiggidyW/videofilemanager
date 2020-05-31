@@ -1,10 +1,10 @@
-use std::{error::Error as StdError, path::PathBuf};
+mod cache;
+mod file_map;
+pub mod core;
+mod database;
+mod error;
 
-pub trait FileMap {
-    type Reader: Read + 'static;
-    fn get(key: &str) -> Option<PathBuf>;
-}
-
-pub trait Cache {
-    type Error: StdError + 'static;
-}
+pub use cache::Cache;
+pub use file_map::FileMap;
+pub use database::Database;
+pub use error::Error;
