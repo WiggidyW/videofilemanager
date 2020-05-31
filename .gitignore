@@ -5,3 +5,4 @@ secrets.yml
 **/__pycache__
 **/.mypy_cache
 build
+**/Cargo.lock
