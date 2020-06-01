@@ -1,12 +1,17 @@
-pub type StreamHash = std::rc::Rc<str>;
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
 
-mod cache;
-mod file_map;
-pub mod core;
-mod database;
-mod error;
+pub mod cache;
+pub mod file_map;
+pub mod database;
 
-pub use cache::Cache;
-pub use file_map::FileMap;
-pub use database::Database;
-pub use error::Error;
+pub(crate) use {cache::Cache, file_map::FileMap, database::Database};
+
+pub(crate) mod core;
+pub(crate) mod media_mixer;
+
+#[feature(proc_macro_hygiene, decl_macro)]
+#[macro_use] extern crate lazy_static;
+#[macro_use] extern crate rocket;
+pub mod microservice;

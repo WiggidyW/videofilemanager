@@ -1,6 +1,6 @@
 pub use memory_cache::Cache as DefaultCache;
 
-pub trait Cache {
+pub trait Cache: Send + Sync + 'static {
     type Error: std::error::Error + 'static;
     fn get(
         &self,
@@ -11,7 +11,7 @@ pub trait Cache {
         key: u32,
         hashes: T,
         timestamp: u64,
-    ) -> Result<(&[String], u64), Self::Error>;
+    ) -> Result<(), Self::Error>;
     fn remove(
         &mut self,
         key: u32,
@@ -43,16 +43,13 @@ mod memory_cache {
             key: u32,
             hashes: T,
             timestamp: u64,
-        ) -> Result<(&[String], u64), Self::Error>
+        ) -> Result<(), Self::Error>
         {
             self.inner.insert(
                 key,
                 (Vec::from(hashes.as_ref()), timestamp),
             );
-            Ok(self.get(key)
-                .unwrap()
-                .unwrap()
-            )
+            Ok(())
         }
         fn remove(
             &mut self,
