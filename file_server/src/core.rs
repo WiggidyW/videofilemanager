@@ -1,11 +1,16 @@
-use std::path::Path;
-use crate::{Cache, FileMap, Database, StreamHash};
+use std::{path::{Path, PathBuf}, marker::PhantomData};
+use crate::{Cache, FileMap, Database};
 use wrappers::{FileMapWrapper, CacheWrapper, DatabaseWrapper};
 
 pub struct Operator<F, C, D> {
     file_map: FileMapWrapper<F, C, D>,
     cache: CacheWrapper<F, C, D>,
     database: DatabaseWrapper<F, C, D>,
+}
+
+struct Item {
+    file_id: u32,
+    path: PathBuf,
 }
 
 macro_rules! error {
@@ -18,12 +23,20 @@ macro_rules! error {
     }
 }
 
-impl<'c, F, C, D> Operator<F, C, D>
+impl<F, C, D> Operator<F, C, D>
 where
     F: FileMap,
     C: Cache,
     D: Database,
 {
+    pub fn new(file_map: F, cache: C, database: D) -> Self {
+        Self {
+            file_map: FileMapWrapper::new(file_map),
+            cache: CacheWrapper::new(cache),
+            database: DatabaseWrapper::new(database),
+        }
+    }
+
     fn current_time() -> Result<u64, error!()> {
         unimplemented!()
     }
@@ -35,10 +48,39 @@ where
         unimplemented!()
     }
 
-    fn hash_file<P: AsRef<Path>>(
+    fn get_item(&mut self, alias: &str) -> Result<Item, error!()> {
+        let file_id = match self.database.get_file_id(alias)?
+        {
+            Some(i) => i,
+            None => {
+                let file_id = self.database.create_file_id()?;
+                self.database.create_alias(alias, file_id)?;
+                file_id
+            },
+        };
+        let path = self.file_map.get(file_id)?;
+        Ok(Item {
+            file_id: file_id,
+            path: path,
+        })
+    }
+
+    fn try_hash_file<P: AsRef<Path>>(
         path: P,
-    ) -> Result<Vec<StreamHash>, error!()>
+    ) -> Result<Vec<String>, error!()>
     {
+        unimplemented!()
+    }
+
+    // Comfort method that makes the cache practical. Abstracts away some things.
+    //
+    // returns None if the Cache does not exist.
+    // returns None if the Cache exists but is expired.
+    // Returns Some if the Cache exists and is not expired.
+    fn try_hash_cache(
+        &self,
+        item: &Item,
+    ) -> Result<Option<&[String]>, error!()> {
         unimplemented!()
     }
 
@@ -55,20 +97,12 @@ where
     pub fn add_file<P: AsRef<Path>>(
         &mut self,
         alias: &str,
-        file: P,
+        source: P,
     ) -> Result<(), error!()>
     {
-        let file_id = match self.database.get_file_id(alias)?
-        {
-            Some(i) => i,
-            None => {
-                let file_id = self.database.create_file_id()?;
-                self.database.create_alias(alias, file_id)?;
-                file_id
-            },
-        };
-        let target = self.file_map.get(file_id)?;
-        Self::mux_file(file, target)
+        let target = self.get_item(alias)?
+            .path;
+        Self::mux_file(source, target)
     }
 
     // Returns None if:
@@ -77,30 +111,23 @@ where
     pub fn get_hashes(
         &mut self,
         alias: &str,
-    ) -> Result<Option<Vec<StreamHash>>, error!()>
+    ) -> Result<Option<Vec<String>>, error!()>
     {
-        let file_id = match self.database.get_file_id(alias)?
-        {
-            Some(i) => i,
-            None => return Ok(None),
-        };
-        let file_path = self.file_map.get(file_id)?;
-        if !file_path.is_file() {
+        let item = self.get_item(alias)?;
+        if !item.path.is_file() {
             return Ok(None);
         }
-        if let Some((hashes, cache_time)) = self.cache.get(file_id)?
+        if let Some(hashes) = self.try_hash_cache(&item)?
         {
-            let file_time = Self::file_time(&file_path)?;
-            if cache_time >= file_time {
-                return Ok(Some(hashes));
-            }
-            else {
-                self.cache.remove(file_id)?;
-            }
+            let hashes = hashes
+                .iter()
+                .map(|s| s.clone())
+                .collect();
+            return Ok(Some(hashes));
         }
-        let hashes = Self::hash_file(&file_path)?;
+        let hashes = Self::try_hash_file(&item.path)?;
         self.cache.set(
-            file_id,
+            item.file_id,
             &hashes,
             Self::current_time()?
         )?;
@@ -168,23 +195,53 @@ where
 }
 
 mod wrappers {
-    use crate::{Cache, FileMap, Database, StreamHash, Error};
+    use crate::{Cache, FileMap, Database, Error};
     use std::marker::PhantomData;
 
-    pub struct FileMapWrapper<F, C, D>{
+    pub struct FileMapWrapper<F, C, D> {
         inner: F,
         c: PhantomData<C>,
         d: PhantomData<D>,
     }
-    pub struct CacheWrapper<F, C, D>{
+    pub struct CacheWrapper<F, C, D> {
         f: PhantomData<F>,
         inner: C,
         d: PhantomData<D>,
     }
-    pub struct DatabaseWrapper<F, C, D>{
+    pub struct DatabaseWrapper<F, C, D> {
         f: PhantomData<F>,
         c: PhantomData<C>,
         inner: D,
+    }
+
+    impl<F, C, D> FileMapWrapper<F, C, D> {
+        pub fn new(inner: F) -> Self {
+            Self {
+                inner: inner,
+                c: PhantomData,
+                d: PhantomData,
+            }
+        }
+    }
+
+    impl<F, C, D> CacheWrapper<F, C, D> {
+        pub fn new(inner: C) -> Self {
+            Self {
+                f: PhantomData,
+                inner: inner,
+                d: PhantomData,
+            }
+        }
+    }
+
+    impl<F, C, D> DatabaseWrapper<F, C, D> {
+        pub fn new(inner: D) -> Self {
+            Self {
+                f: PhantomData,
+                c: PhantomData,
+                inner: inner,
+            }
+        }
     }
 
     impl<F, C, D> FileMap for FileMapWrapper<F, C, D>
@@ -217,20 +274,20 @@ mod wrappers {
             <D as Database>::Error,
         >;
         fn get(
-            &mut self,
+            &self,
             key: u32,
-        ) -> Result<Option<(Vec<StreamHash>, u64)>, Self::Error>
+        ) -> Result<Option<(&[String], u64)>, Self::Error>
         {
             self.inner
                 .get(key)
                 .map_err(|e| Self::Error::CacheError(e))
         }
-        fn set<T: AsRef<[StreamHash]>>(
+        fn set<T: AsRef<[String]>>(
             &mut self,
             key: u32,
             hashes: T,
             timestamp: u64,
-        ) -> Result<(), Self::Error>
+        ) -> Result<(&[String], u64), Self::Error>
         {
             self.inner
                 .set(key, hashes, timestamp)
@@ -313,16 +370,5 @@ mod wrappers {
                 .remove_alias(alias)
                 .map_err(|e| Self::Error::DatabaseError(e))
         }
-        // fn commit_transaction(&mut self) -> Result<(), Self::Error> {
-        //     self.inner
-        //         .commit_transaction()
-        //         .map_err(|e| Self::Error::DatabaseError(e))
-        // }
-        // fn start_transaction(&mut self) {
-        //     self.inner.start_transaction()
-        // }
-        // fn discard_transaction(&mut self) {
-        //     self.inner.discard_transaction()
-        // }
     }
 }
