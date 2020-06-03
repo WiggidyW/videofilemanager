@@ -1,26 +1,14 @@
-use std::{path::Path, time::SystemTime, error::Error as StdError, fmt::{Display, Formatter, Error as FmtError, Debug}};
+use std::{path::{Path, PathBuf}, time::SystemTime, error::Error as StdError, fmt::{Display, Formatter, Error as FmtError, Debug}};
 use crate::{Cache, FileMap, Database};
 
 #[derive(Debug)]
 pub enum Error {
-    FileMapError(Box<dyn StdError>, Option<&'static str>),
-    CacheError(Box<dyn StdError>, Option<&'static str>),
-    DatabaseError(Box<dyn StdError>, Option<&'static str>),
+    FileMapError(Box<dyn StdError>),
+    CacheError(Box<dyn StdError>),
+    DatabaseError(Box<dyn StdError>),
     FilesystemError(std::io::Error, Option<&'static str>),
     SystemTimeError(std::time::SystemTimeError),
     Infallible(Option<&'static str>),
-}
-
-impl Error {
-    fn database_err(e: impl StdError + 'static, s: Option<&'static str>) -> Self {
-        Self::DatabaseError(Box::new(e), s)
-    }
-    fn cache_err(e: impl StdError + 'static, s: Option<&'static str>) -> Self {
-        Self::CacheError(Box::new(e), s)
-    }
-    fn filemap_err(e: impl StdError + 'static, s: Option<&'static str>) -> Self {
-        Self::FileMapError(Box::new(e), s)
-    }
 }
 
 impl Display for Error {
@@ -29,7 +17,18 @@ impl Display for Error {
     }
 }
 
-impl StdError for Error {}
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::FileMapError(e) => Some(&**e),
+            Self::CacheError(e) => Some(&**e),
+            Self::DatabaseError(e) => Some(&**e),
+            Self::FilesystemError(e, _) => Some(e),
+            Self::SystemTimeError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
 
 impl From<crate::media_mixer::Error> for Error {
     fn from(value: crate::media_mixer::Error) -> Self {
@@ -37,45 +36,41 @@ impl From<crate::media_mixer::Error> for Error {
     }
 }
 
-pub fn list_aliases<D: Database>(
-    database: &D,
+pub fn list_aliases(
+    database: &impl Database<Error = Error>,
 ) -> Result<Vec<Vec<String>>, Error>
 {
     database.list_aliases()
-        .map_err(|e| Error::database_err(e, None))
 }
 
 // return None:
 //   - new_alias Already Exists.
-pub fn add_alias<D: Database>(
+pub fn add_alias(
     alias: &str,
     new_alias: &str,
-    database: &D,
+    database: &impl Database<Error = Error>,
 ) -> Result<Option<()>, Error>
 {
     let file_id = get_file_id(alias, database)?;
     database.create_alias(new_alias, file_id)
-        .map_err(|e| Error::database_err(e, None))
 }
 // return None:
 //   - alias Does Not Exist.
-pub fn remove_alias<D: Database>(
+pub fn remove_alias(
     alias: &str,
-    database: &D,
+    database: &impl Database<Error = Error>,
 ) -> Result<Option<()>, Error>
 {
     database.remove_alias(alias)
-        .map_err(|e| Error::database_err(e, None))
 }
 
-pub fn get_aliases<D: Database>(
+pub fn get_aliases(
     alias: &str,
-    database: &D,
+    database: &impl Database<Error = Error>,
 ) -> Result<Vec<String>, Error>
 {
     let file_id = get_file_id(alias, database)?;
-    match database.get_aliases(file_id)
-        .map_err(|e| Error::database_err(e, None))?
+    match database.get_aliases(file_id)?
     {
         Some(aliases) => Ok(aliases),
         None => Err(Error::Infallible(Some(
@@ -84,16 +79,15 @@ pub fn get_aliases<D: Database>(
     }
 }
 
-pub fn add_file<F: FileMap, D: Database>(
+pub fn add_file(
     alias: &str,
     source: impl AsRef<Path>,
-    file_map: &F,
-    database: &D,
+    file_map: &impl FileMap<Error = Error>,
+    database: &impl Database<Error = Error>,
 ) -> Result<(), Error>
 {
     let file_id = get_file_id(alias, database)?;
-    let target = file_map.get(file_id)
-        .map_err(|e| Error::filemap_err(e, None))?;
+    let target = file_map.get(file_id)?;
     mux_file(source, target)
 }
 
@@ -109,37 +103,48 @@ fn current_time() -> Result<u64, Error> {
 //   - file_path from alias is not a file.
 //   - cache is empty.
 //   - cache is expired.
-pub fn try_get_hashes<'c, F: FileMap, C: Cache, D: Database>(
+pub fn try_get_hashes<'c>(
     alias: &str,
-    file_map: &F,
-    cache: &'c C,
-    database: &D,
+    file_map: &impl FileMap<Error = Error>,
+    cache: &'c impl Cache<Error = Error>,
+    database: &impl Database<Error = Error>,
 ) -> Result<Option<&'c [String]>, Error>
 {
     let file_id = get_file_id(alias, database)?;
-    let file_path = file_map.get(file_id)
-        .map_err(|e| Error::filemap_err(e, None))?;
+    let file_path = file_map.get(file_id)?;
     if !file_path.is_file() {
         return Ok(None);
     }
     try_hash_cache(file_id, file_path, cache)
 }
 
-pub fn refresh_hashes<F: FileMap, C: Cache, D: Database>(
+pub fn refresh_hashes(
     alias: &str,
-    file_map: &F,
-    cache: &mut C,
-    database: &D,
+    file_map: &impl FileMap<Error = Error>,
+    cache: &mut impl Cache<Error = Error>,
+    database: &impl Database<Error = Error>,
 ) -> Result<Vec<String>, Error>
 {
     let file_id = get_file_id(alias, database)?;
-    let file_path = file_map.get(file_id)
-        .map_err(|e| Error::filemap_err(e, None))?;
+    let file_path = file_map.get(file_id)?;
     let hashes = try_hash_file(file_path)?;
     let current_time = current_time()?;
-    cache.set(file_id, &hashes, current_time)
-        .map_err(|e| Error::cache_err(e, None))?;
+    cache.set(file_id, &hashes, current_time)?;
     Ok(hashes)
+}
+
+pub fn get_file_path(
+    alias: &str,
+    file_map: &impl FileMap<Error = Error>,
+    database: &impl Database<Error = Error>,
+) -> Result<Option<PathBuf>, Error>
+{
+    let file_id = get_file_id(alias, database)?;
+    let file_path = file_map.get(file_id)?;
+    match file_path.is_file() {
+        true => Ok(Some(file_path)),
+        false => Ok(None),
+    }
 }
 
 fn file_time(
@@ -158,20 +163,17 @@ fn file_time(
     Ok(time)
 }
 
-fn get_file_id<D: Database>(
+fn get_file_id(
     alias: &str,
-    database: &D,
+    database: &impl Database<Error = Error>,
 ) -> Result<u32, Error>
 {
-    if let Some(file_id) = database.get_file_id(alias)
-        .map_err(|e| Error::database_err(e, None))?
+    if let Some(file_id) = database.get_file_id(alias)?
     {
         return Ok(file_id);
     }
-    let file_id = database.create_file_id()
-        .map_err(|e| Error::database_err(e, None))?;
-    database.create_alias(alias, file_id)
-        .map_err(|e| Error::database_err(e, None))?;
+    let file_id = database.create_file_id()?;
+    database.create_alias(alias, file_id)?;
     Ok(file_id)
 }
 
@@ -185,14 +187,13 @@ fn try_hash_file(
 // return None:
 //   - cache is empty.
 //   - cache is expired.
-fn try_hash_cache<'c, C: Cache>(
+fn try_hash_cache<'c>(
     file_id: u32,
     path: impl AsRef<Path>,
-    cache: &'c C,
+    cache: &'c impl Cache<Error = Error>,
 ) -> Result<Option<&'c [String]>, Error>
 {
-    match cache.get(file_id)
-        .map_err(|e| Error::cache_err(e, None))?
+    match cache.get(file_id)?
     {
         None => Ok(None),
         Some((h, t)) if t < file_time(path)? => Ok(Some(h)),
