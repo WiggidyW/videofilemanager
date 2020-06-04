@@ -43,6 +43,7 @@ impl From<crate::media_mixer::Error> for Error {
 }
 
 // return None:
+//   - alias Does Not Exist.
 //   - new_alias Already Exists.
 pub fn add_alias(
     alias: &str,
@@ -50,17 +51,36 @@ pub fn add_alias(
     database: &mut impl Database<Error = Error>,
 ) -> Result<Option<()>, Error>
 {
-    let file_id = get_or_create_file_id(alias, database)?;
+    if let Some(_) = database.get_file_id(new_alias)?
+    {
+        return Ok(None);
+    }
+    let file_id = match database.get_file_id(alias)?
+    {
+        Some(i) => i,
+        None => return Ok(None),
+    };
     database.create_alias(new_alias, file_id)
 }
 
 // return None:
 //   - alias Does Not Exist.
+//   - file_id Would Be Orphaned.
 pub fn remove_alias(
     alias: &str,
     database: &mut impl Database<Error = Error>,
 ) -> Result<Option<()>, Error>
 {
+    let file_id = match database.get_file_id(alias)?
+    {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+    match database.get_aliases(file_id)?
+    {
+        Some(s) if s.len() > 1 => (),
+        _ => return Ok(None),
+    };
     database.remove_alias(alias)
 }
 
@@ -128,9 +148,7 @@ pub fn get_aliases(
     match database.get_aliases(file_id)?
     {
         Some(aliases) => Ok(Some(aliases)),
-        None => Err(Error::Infallible(Some(
-            "Confirmed Alias is in DB, but it vanished. This shouldn't happen."
-        ))),
+        None => Err(Error::Infallible(None)), // we just verified it does
     }
 }
 
@@ -169,9 +187,14 @@ pub fn add_file(
     database: &mut impl Database<Error = Error>,
 ) -> Result<(), Error>
 {
-    let file_id = get_or_create_file_id(alias, database)?;
+    let file_id = match database.get_file_id(alias)?
+    {
+        Some(i) => i,
+        None => database.create_file_id()?,
+    };
     let target = file_map.get(file_id)?;
-    mux_file(source, target)
+    mux_file(source, target)?;
+    database.create_alias(alias, file_id).map(|_| ()) // for atomicity
 }
 
 // return None:
@@ -215,20 +238,6 @@ fn file_time(
     Ok(time)
 }
 
-fn get_or_create_file_id(
-    alias: &str,
-    database: &mut impl Database<Error = Error>,
-) -> Result<u32, Error>
-{
-    if let Some(file_id) = database.get_file_id(alias)?
-    {
-        return Ok(file_id);
-    }
-    let file_id = database.create_file_id()?;
-    database.create_alias(alias, file_id)?;
-    Ok(file_id)
-}
-
 fn try_hash_file(
     path: impl AsRef<Path>,
 ) -> Result<Vec<String>, Error>
@@ -241,5 +250,7 @@ fn mux_file(
     target: impl AsRef<Path>,
 ) -> Result<(), Error>
 {
-    Ok(crate::media_mixer::mux_file(source, target)?)
+    Ok(
+        crate::media_mixer::mux_file(source, target)?
+    )
 }
