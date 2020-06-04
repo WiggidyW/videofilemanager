@@ -1,4 +1,10 @@
-use std::{path::{Path, PathBuf}, time::SystemTime, error::Error as StdError, fmt::{Display, Formatter, Error as FmtError, Debug}};
+use std::{
+    path::{Path, PathBuf},
+    time::SystemTime,
+    error::Error as StdError,
+    fmt::{Display, Formatter, Error as FmtError, Debug},
+    io::Read,
+};
 use crate::{Cache, FileMap, Database};
 
 #[derive(Debug)]
@@ -6,7 +12,7 @@ pub enum Error {
     FileMapError(Box<dyn StdError>),
     CacheError(Box<dyn StdError>),
     DatabaseError(Box<dyn StdError>),
-    FilesystemError(std::io::Error, Option<&'static str>),
+    FilesystemError(std::io::Error),
     SystemTimeError(std::time::SystemTimeError),
     Infallible(Option<&'static str>),
 }
@@ -23,7 +29,7 @@ impl StdError for Error {
             Self::FileMapError(e) => Some(&**e),
             Self::CacheError(e) => Some(&**e),
             Self::DatabaseError(e) => Some(&**e),
-            Self::FilesystemError(e, _) => Some(e),
+            Self::FilesystemError(e) => Some(e),
             Self::SystemTimeError(e) => Some(e),
             _ => None,
         }
@@ -47,6 +53,7 @@ pub fn add_alias(
     let file_id = get_or_create_file_id(alias, database)?;
     database.create_alias(new_alias, file_id)
 }
+
 // return None:
 //   - alias Does Not Exist.
 pub fn remove_alias(
@@ -155,6 +162,18 @@ pub fn get_file_path(
     }
 }
 
+pub fn add_file(
+    alias: &str,
+    source: impl Read,
+    file_map: &impl FileMap<Error = Error>,
+    database: &mut impl Database<Error = Error>,
+) -> Result<(), Error>
+{
+    let file_id = get_or_create_file_id(alias, database)?;
+    let target = file_map.get(file_id)?;
+    mux_file(source, target)
+}
+
 // return None:
 //   - cache is empty.
 //   - cache is expired.
@@ -172,18 +191,6 @@ fn try_hash_cache<'c>(
     }
 }
 
-pub fn add_file(
-    alias: &str,
-    source: impl AsRef<Path>,
-    file_map: &impl FileMap<Error = Error>,
-    database: &mut impl Database<Error = Error>,
-) -> Result<(), Error>
-{
-    let file_id = get_or_create_file_id(alias, database)?;
-    let target = file_map.get(file_id)?;
-    mux_file(source, target)
-}
-
 fn current_time() -> Result<u64, Error> {
     let time = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -199,9 +206,9 @@ fn file_time(
     let time = path
         .as_ref()
         .metadata()
-        .map_err(|e| Error::FilesystemError(e, None))?
+        .map_err(|e| Error::FilesystemError(e))?
         .modified()
-        .map_err(|e| Error::FilesystemError(e, None))?
+        .map_err(|e| Error::FilesystemError(e))?
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_err(|e| Error::SystemTimeError(e))?
         .as_secs();
@@ -230,7 +237,7 @@ fn try_hash_file(
 }
 
 fn mux_file(
-    source: impl AsRef<Path>,
+    source: impl Read,
     target: impl AsRef<Path>,
 ) -> Result<(), Error>
 {

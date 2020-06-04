@@ -12,7 +12,6 @@ pub(crate) use {cache::Cache, file_map::FileMap, database::Database};
 pub(crate) mod core;
 pub(crate) mod media_mixer;
 
-#[macro_use] extern crate lazy_static;
 #[macro_use] extern crate rocket;
 pub mod microservice;
 

@@ -10,3 +10,6 @@ edition = "2018"
 rocket = { version = "^0.4", default-features = false, features = ["tls"] }
 lazy_static = { version = "^1.4" }
 rusqlite = { version = "^0.23" }
+serde = { version = "^1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "^1.0" }
+derive_more = { version = "^0.99" }
