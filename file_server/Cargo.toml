@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 rocket = { version = "^0.4", default-features = false, features = ["tls"] }
 lazy_static = { version = "^1.4" }
+rusqlite = { version = "^0.23" }

@@ -28,7 +28,7 @@ pub fn run<F, C, D>(
 {
     let file_map: FileMap = Box::new(file_map);
     let cache: RwLock<Cache> = RwLock::new(Box::new(cache));
-    let database: Database = Box::new(database);
+    let database: RwLock<Database> = RwLock::new(Box::new(database));
     rocket::ignite()
         .manage(file_map)
         .manage(cache)
