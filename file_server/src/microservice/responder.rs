@@ -1,9 +1,8 @@
 use std::{error::Error as StdError, fmt::{Display, self}, convert::TryFrom, path::Path};
 use rocket::response::{Responder, NamedFile};
-use derive_more::From;
 use serde_json::Value as Json;
-use serde::Serialize;
 use lazy_static::lazy_static;
+use serde::Serialize;
 use crate::core;
 
 #[derive(Responder)]
@@ -27,17 +26,14 @@ impl Response {
     pub fn file(value: &Path) -> Self {
         Self::from(value)
     }
-    pub fn not_found_error(value: impl Serialize) -> Self {
-        let field = Field {
-            content: Json::Null,
-            error: value,
-            status: true,
-        };
-        Self::NotFoundError(field.to_json())
-    }
     pub fn file_not_found_error(alias: &str) -> Self {
         Self::not_found_error(format!(
             "The alias '{}' has no associated file!", alias
+        ))
+    }
+    pub fn alias_not_found_error(alias: &str) -> Self {
+        Self::not_found_error(format!(
+            "The alias '{}' does not exist!", alias
         ))
     }
     pub fn streams(value: &[String]) -> Self {
@@ -60,6 +56,14 @@ impl Response {
         }
         Self::Okay(&OKAY)
     }
+    fn not_found_error(value: impl Serialize) -> Self {
+        let field = Field {
+            content: Json::Null,
+            error: value,
+            status: true,
+        };
+        Self::NotFoundError(field.to_json())
+    }
 }
 
 #[derive(Serialize)]
@@ -74,10 +78,6 @@ struct InternalError {
     display: String,
     debug: String,
     source: Option<Box<InternalError>>,
-}
-
-struct Streams {
-
 }
 
 impl From<&core::Error> for Response {
@@ -95,7 +95,7 @@ impl From<&Path> for Response {
     fn from(value: &Path) -> Self {
         match NamedFile::open(value) {
             Ok(f) => Self::File(f),
-            Err(e) => Self::internal_error(&core::Error::FilesystemError(e)),
+            Err(e) => Self::internal_error(&core::Error::FileSystemError(e)),
         }
     }
 }
