@@ -10,28 +10,40 @@ pub fn run(file_map: FileMap, cache: Cache, database: Database) {
         .manage(RwLock::new(database));
 }
 
-#[get("/<alias>")]
-fn get(
-    alias: String,
+#[get("/<id>")]
+fn get_from_file_id(
+    id: u32,
+    file_map: State<FileMap>,
+) -> Response
+{
+    let file_map = &*file_map;
+    let file = match core::File::from_file_id(id, file_map) {
+        Ok(f) => f,
+        Err(e) => return Response::internal_error(&e),
+    };
+    match file.path() {
+        Ok(Some(path)) => Response::file(&path),
+        Ok(None) => Response::id_file_not_found(id),
+        Err(e) => Response::internal_error(&e),
+    }
+}
+
+#[get("/<id>", rank = 2)]
+fn get_from_alias(
+    id: String,
     file_map: State<FileMap>,
     database: State<RwLock<Database>>,
 ) -> Response
 {
     let database = &*database.read().unwrap();
-    let file_id = match core::FileId::from_alias(&alias, database) {
+    let file_id = match core::FileId::from_alias(&id, database) {
         Ok(Some(i)) => i,
-        Ok(None) => return Response::alias_not_found_error(&alias),
+        Ok(None) => return Response::alias_not_found(&id),
         Err(e) => return Response::internal_error(&e),
     };
-    let file_map = &*file_map;
-    let file = match core::File::from_file_id(file_id, file_map) {
-        Ok(f) => f,
-        Err(e) => return Response::internal_error(&e),
-    };
-    match file.readable_fs_path() {
-        Ok(Some(path)) => Response::file(&path),
-        Ok(None) => Response::file_not_found_error(&alias),
-        Err(e) => Response::internal_error(&e),
+    match get_from_file_id(*file_id, file_map) {
+        Response::NotFoundError(_) => Response::alias_file_not_found(&id),
+        any => any,
     }
 }
 

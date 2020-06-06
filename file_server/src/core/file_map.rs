@@ -9,11 +9,15 @@ pub mod local_file_map {
 
     pub struct LocalFileMap {
         base_path: PathBuf,
+        extension: &'static str,
     }
 
     impl LocalFileMap {
-        pub fn new(path: impl AsRef<Path>) -> Self {
-            Self { base_path: path.as_ref().to_owned() }
+        pub fn new(path: impl AsRef<Path>, extension: &'static str) -> Self {
+            Self {
+                base_path: path.as_ref().to_owned(),
+                extension: extension,
+            }
         }
     }
 
@@ -23,6 +27,7 @@ pub mod local_file_map {
             self.base_path.metadata()?;
             let mut path = self.base_path.clone();
             path.push(key.to_string());
+            path.set_extension(self.extension);
             Ok(path)
         }
     }

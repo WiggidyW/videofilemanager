@@ -10,15 +10,16 @@ pub type Cache = cache::memory_cache::MemoryCache;
 pub type Database = database::sqlite_database::SqliteDatabase;
 
 use std::{time::SystemTime, path::{Path, PathBuf}, io::Read};
+use derive_more::Deref;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deref)]
 pub struct FileId {
     file_id: u32,
 }
 
 #[derive(Debug)]
 pub struct File {
-    file_id: FileId,
+    file_id: u32,
     path: PathBuf,
 }
 
@@ -75,7 +76,7 @@ impl FileId {
 
 impl File {
     pub fn from_file_id(
-        file_id: FileId,
+        file_id: u32,
         file_map: &FileMap,
     ) -> Result<Self, Error>
     {
@@ -110,7 +111,7 @@ impl File {
         unimplemented!()
     }
 
-    pub fn readable_fs_path(&self) -> Result<Option<PathBuf>, Error> {
+    pub fn path(&self) -> Result<Option<PathBuf>, Error> {
         unimplemented!()
     }
 }

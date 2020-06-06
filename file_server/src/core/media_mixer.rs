@@ -1,4 +1,11 @@
-use std::{io::Read, path::Path};
+use std::{io::{self, Read}, path::{Path, PathBuf}, sync::RwLock, collections::HashMap};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref FLOCK: RwLock<HashMap<PathBuf, RwLock<()>>> = RwLock::new(
+        HashMap::new()
+    );
+}
 
 #[derive(Debug)]
 pub struct Error {}
