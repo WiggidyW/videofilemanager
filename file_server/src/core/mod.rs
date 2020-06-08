@@ -1,159 +1,288 @@
 mod media_mixer;
-mod cache;
 mod database;
 mod file_map;
 mod error;
 
 pub use error::Error;
 pub type FileMap = file_map::local_file_map::LocalFileMap;
-pub type Cache = cache::memory_cache::MemoryCache;
 pub type Database = database::sqlite_database::SqliteDatabase;
 
-use std::{time::SystemTime, path::{Path, PathBuf}, io::Read};
-use derive_more::Deref;
+type Result<T> = std::result::Result<T, Error>;
+
+use {database::Database as DB, file_map::FileMap as FM};
+use std::{time::SystemTime, path::{Path, PathBuf}, io::{Read, ErrorKind}, fs::File as StdFile};
+use derive_more::{Deref, DerefMut};
+use chashmap::{CHashMap, ReadGuard, WriteGuard};
 
 #[derive(Debug, Clone, Copy, Deref)]
-pub struct FileId {
-    file_id: u32,
+pub struct FileId<'db, 't, 'm> {
+    #[deref]
+    id: u32,
+    database: &'db Database,
+    file_table: &'t FileTable,
+    file_map: &'m FileMap,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Hash)]
 pub struct File {
-    file_id: u32,
     path: PathBuf,
+    streams: Option<(Vec<String>, u64)>,
 }
 
-impl FileId {
-    pub fn from_file_id(
-        file_id: u32,
-        database: &Database,
-    ) -> Result<Option<Self>, Error>
+#[derive(Debug, Deref)]
+pub struct FileTable {
+    inner: CHashMap<u32, File>,
+}
+
+#[derive(Debug, Deref)]
+#[deref(forward)]
+pub struct ROFile<'t> {
+    inner: ReadGuard<'t, u32, File>,
+}
+
+#[derive(Debug, Deref, DerefMut)]
+#[deref(forward)]
+#[deref_mut(forward)]
+pub struct RWFile<'t> {
+    inner: WriteGuard<'t, u32, File>,
+}
+
+#[derive(Deref, DerefMut)]
+struct Reader<'t> {
+    #[deref]
+    #[deref_mut]
+    file: StdFile,
+    rolock: ROFile<'t>
+}
+
+impl<'db, 't, 'm> FileId<'db, 't, 'm> {
+    pub fn new(
+        database: &'db Database,
+        file_table: &'t FileTable,
+        file_map: &'m FileMap,
+    ) -> Result<Self>
     {
-        unimplemented!()
+        Ok(Self {
+            id: database.create_id()
+                .map_err(|e| Error::database_err(e))?,
+            database: database,
+            file_table: file_table,
+            file_map: file_map,
+        })
+    }
+
+    pub fn all(
+        database: &'db Database,
+        file_table: &'t FileTable,
+        file_map: &'m FileMap,
+    ) -> Result<Vec<Self>>
+    {
+        Ok(database.list_ids()
+            .map_err(|e| Error::database_err(e))?
+            .into_iter()
+            .map(|id| Self {
+                id: id,
+                database: database,
+                file_table: file_table,
+                file_map: file_map,
+            })
+            .collect()
+        )
+    }
+
+    pub fn from_id(
+        id: u32,
+        database: &'db Database,
+        file_table: &'t FileTable,
+        file_map: &'m FileMap,
+    ) -> Result<Option<Self>>
+    {
+        match database.id_exists(id)
+            .map_err(|e| Error::database_err(e))?
+        {
+            true => Ok(Some(Self {
+                id: id,
+                database: database,
+                file_table: file_table,
+                file_map: file_map,
+            })),
+            false => Ok(None),
+        }
     }
 
     pub fn from_alias(
         alias: &str,
-        database: &Database,
-    ) -> Result<Option<Self>, Error>
+        database: &'db Database,
+        file_table: &'t FileTable,
+        file_map: &'m FileMap,
+    ) -> Result<Option<Self>>
     {
-        unimplemented!()
-    }
-
-    pub fn new(
-        database: &mut Database,
-    ) -> Result<Option<Self>, Error>
-    {
-        unimplemented!()
+        match database.get_id(alias)
+            .map_err(|e| Error::database_err(e))?
+        {
+            Some(id) => Ok(Some(Self {
+                id: id,
+                database: database,
+                file_table: file_table,
+                file_map: file_map,
+            })),
+            None => Ok(None),
+        }
     }
 
     pub fn with_aliases(
         &self,
-        aliases: &[impl AsRef<str>],
-        database: &mut Database,
-    ) -> Result<Option<()>, Error>
+        aliases: Vec<String>,
+    ) -> Result<Option<()>>
     {
-        unimplemented!()
+        self.database.create_aliases(aliases, **self)
+            .map_err(|e| Error::database_err(e))
     }
 
     pub fn without_aliases(
         &self,
-        aliases: &[impl AsRef<str>],
-        database: &mut Database,
-    ) -> Result<Option<()>, Error>
+        aliases: Vec<String>,
+    ) -> Result<Option<()>>
     {
-        unimplemented!()
+        for alias in &aliases {
+            match self.database.get_id(alias.as_ref()) {
+                Ok(Some(i)) if i == **self => (),
+                Err(e) => return Err(Error::database_err(e)),
+                _ => return Ok(None),
+            };
+        }
+        self.database.remove_aliases(aliases, **self)
+            .map_err(|e| Error::database_err(e))
     }
 
-    pub fn get_aliases(
-        &self,
-        database: &Database,
-    ) -> Result<Vec<String>, Error>
-    {
-        unimplemented!()
+    pub fn get_aliases(&self) -> Result<Vec<String>> {
+        self.database.get_aliases(**self)
+            .map(|a| a.unwrap_or(Vec::new()))
+            .map_err(|e| Error::database_err(e))
+    }
+
+    // Ensures that FileMap and FileTable return the same path, then returns
+    // a file for reading only.
+    pub fn ro_file(&self) -> Result<ROFile<'t>> {
+        let path = self.path()?;
+        let inner = match self.file_table.get(self) {
+            Some(f) if f.path == path => f,
+            _ => {
+                self.insert_file(path);
+                self.file_table.get(self).unwrap()
+            },
+        };
+        Ok(ROFile { inner: inner })
+    }
+
+    // Ensures that FileMap and FileTable return the same path, then returns
+    // a file for reading or writing.
+    pub fn rw_file(&self) -> Result<RWFile<'t>> {
+        let path = self.path()?;
+        let inner = match self.file_table.get_mut(self) {
+            Some(f) if f.path == path => f,
+            _ => {
+                self.insert_file(path);
+                self.file_table.get_mut(self).unwrap()
+            },
+        };
+        Ok(RWFile { inner: inner })
+    }
+
+    fn path(&self) -> Result<PathBuf> {
+        self.file_map.get(self)
+            .map_err(|e| Error::file_map_err(e))
+    }
+
+    fn insert_file(&self, path: PathBuf) {
+        self.file_table.insert(**self, File {
+            path: path,
+            streams: None,
+        });
     }
 }
 
 impl File {
-    pub fn from_file_id(
-        file_id: u32,
-        file_map: &FileMap,
-    ) -> Result<Self, Error>
-    {
+    pub fn with_file(&mut self, file: impl Read) -> Result<()> {
         unimplemented!()
     }
 
-    pub fn with_file(&self, file: impl Read) -> Result<(), Error> {
-        unimplemented!()
-    }
-
+    // return None if any of the hashes are not present in the file
     pub fn without_streams(
-        &self,
+        &mut self,
         streams: Vec<String>,
-    ) -> Result<Option<()>, Error>
+    ) -> Result<Option<()>>
     {
         unimplemented!()
     }
 
-    pub fn cached_stream_hashes<'c>(
-        &self,
-        cache: &'c Cache,
-    ) -> Result<Option<&'c [String]>, Error>
-    {
+    // return None if the hashes are stale or empty
+    pub fn stream_hashes<'a>(&'a self) -> Result<Option<&'a [String]>> {
+        match &self.streams {
+            None => Ok(None),
+            Some(streams) =>
+        match self.modified_time()?
+        {
+            None => Ok(None),
+            Some(t) if t == streams.1 => Ok(Some(&streams.0)),
+            Some(_) => Ok(None),
+        }}
+    }
+
+    // return None if file does not exist
+    pub fn refresh_stream_hashes<'a>(
+        &'a mut self,
+    ) -> Result<Option<&'a [String]>> {
         unimplemented!()
     }
 
-    pub fn new_stream_hashes<'c>(
-        &self,
-        cache: &'c mut Cache,
-    ) -> Result<&'c [String], Error>
-    {
-        unimplemented!()
+    pub fn len(&self) -> Result<Option<u64>> {
+        match self.path.metadata() {
+            Ok(m) if m.len() == 0 => Ok(None),
+            Ok(m) => Ok(Some(m.len())),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::FileSystemError(e)),
+        }
     }
 
-    pub fn path(&self) -> Result<Option<PathBuf>, Error> {
-        unimplemented!()
+    pub fn extension(&self) -> Option<String> {
+        self.path.extension()
+            .map(|s| s.to_str())
+            .map(|s| s.map(|s| s.to_string()))
+            .flatten()
+    }
+
+    fn modified_time(&self) -> Result<Option<u64>> {
+        match self.path.metadata()
+            .map(|m| m.modified())
+        {
+            Ok(Ok(m)) => Ok(Some(m
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|e| Error::SystemTimeError(e))?
+                .as_secs()
+            )),
+            Err(e) | Ok(Err(e)) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) | Ok(Err(e)) => Err(Error::FileSystemError(e)),
+        }
     }
 }
 
-mod stream_hashes {
-    use std::path::Path;
-    use super::{Error, Cache};
-
-    fn from_path(path: impl AsRef<Path>) -> Result<(Vec<String>, u64), Error> {
-        unimplemented!()
-    }
-
-    fn from_cache<'c>(
-        file_id: u32,
-        cache: &'c Cache,
-    ) -> Result<Option<(&'c [String], u64)>, Error>
-    {
-        unimplemented!()
+impl<'t> ROFile<'t> {
+    pub fn into_read(self) -> Result<Option<impl Read + 't>> {
+        match StdFile::open(&self.path) {
+            Ok(f) => Ok(Some(Reader { file: f, rolock: self })),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::FileSystemError(e)),
+        }
     }
 }
 
-mod time {
-    use std::{path::Path, time::SystemTime};
-    use super::Error;
-
-    fn now() -> Result<u64, Error> {
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|e| Error::SystemTimeError(e))?
-            .as_secs();
-        Ok(timestamp)
-    }
-
-    fn modified(path: impl AsRef<Path>) -> Result<u64, Error> {
-        let timestamp = path.as_ref()
-            .metadata()
-            .map_err(|e| Error::FileSystemError(e))?
-            .modified()
-            .map_err(|e| Error::FileSystemError(e))?
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|e| Error::SystemTimeError(e))?
-            .as_secs();
-        Ok(timestamp)
+impl Read for Reader<'_> {
+    fn read(
+        &mut self,
+        buf: &mut [u8],
+    ) -> std::result::Result<usize, std::io::Error>
+    {
+        (**self).read(buf)
     }
 }

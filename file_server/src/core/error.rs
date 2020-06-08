@@ -16,6 +16,15 @@ pub enum Error {
     Infallible(Option<&'static str>),
 }
 
+impl Error {
+    pub(crate) fn file_map_err(e: impl StdError + 'static) -> Self {
+        Self::FileMapError(Box::new(e))
+    }
+    pub(crate) fn database_err(e: impl StdError + 'static) -> Self {
+        Self::DatabaseError(Box::new(e))
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
         Ok(())

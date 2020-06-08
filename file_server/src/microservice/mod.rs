@@ -1,5 +1,5 @@
 mod responder;
-use responder::Response;
+use responder::{Content, Error, FileContent};
 
 mod microservice;
 pub use microservice::run;
