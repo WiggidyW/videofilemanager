@@ -20,6 +20,8 @@ pub enum Content {
     StreamHashes(String),
     #[response(status = 200, content_type = "json")]
     AliasList(String),
+    #[response(status = 200, content_type = "json")]
+    JsonProbe(String),
 }
 
 pub struct FileContent<'r> {
@@ -104,6 +106,13 @@ impl Content {
     {
         Self::AliasList(Field {
             content: iter.collect::<HashMap<_, _>>(),
+            error: Json::Null,
+            status: true,
+        }.to_json())
+    }
+    pub fn json_probe(json: Json) -> Self {
+        Self::JsonProbe(Field {
+            content: json,
             error: Json::Null,
             status: true,
         }.to_json())

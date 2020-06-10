@@ -43,3 +43,9 @@ impl StdError for Error {
         }
     }
 }
+
+impl From<super::media_mixer::Error> for Error {
+    fn from(value: super::media_mixer::Error) -> Self {
+        unimplemented!()
+    }
+}

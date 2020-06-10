@@ -203,7 +203,8 @@ impl<'db, 't, 'm> FileId<'db, 't, 'm> {
 }
 
 impl File {
-    pub fn with_file(&mut self, file: impl Read) -> Result<()> {
+    // return None if the file has no streams
+    pub fn with_file(&mut self, file: impl Read) -> Result<Option<()>> {
         unimplemented!()
     }
 
@@ -250,6 +251,15 @@ impl File {
             .map(|s| s.to_str())
             .map(|s| s.map(|s| s.to_string()))
             .flatten()
+    }
+
+    pub fn json_probe(&mut self) -> Result<Option<serde_json::Value>> {
+        if !self.path.is_file() {
+            return Ok(None);
+        }
+        Ok(Some(
+            media_mixer::json_probe(&self.path)?
+        ))
     }
 
     fn modified_time(&self) -> Result<Option<u64>> {
