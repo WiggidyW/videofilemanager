@@ -1,10 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::SystemTime,
-    error::Error as StdError,
-    fmt::{Display, Formatter, Error as FmtError, Debug},
-    io::Read,
-};
+use std::{error::Error as StdError, fmt::{Display, Formatter, Error as FmtError, Debug}};
 
 #[derive(Debug)]
 pub enum Error {
@@ -14,6 +8,13 @@ pub enum Error {
     FileSystemError(std::io::Error),
     SystemTimeError(std::time::SystemTimeError),
     Infallible(Option<&'static str>),
+    StreamHashesNotFound,
+    FileNotFound,
+    IdNotFound(u32),
+    AliasNotFound(String),
+    AliasesAlreadyExist,
+    AliasDoesNotMatchId(String, u32),
+    InvalidMediaFile,
 }
 
 impl Error {

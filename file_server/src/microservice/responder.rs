@@ -1,5 +1,5 @@
-use std::{error::Error as StdError, fmt::{Display, self}, convert::TryFrom, path::Path, collections::HashMap, io::BufReader, hash::Hash};
-use rocket::{response::{Response, Responder, NamedFile, Body}, http::ContentType};
+use std::{error::Error as StdError, convert::TryFrom, collections::HashMap, io::BufReader, hash::Hash};
+use rocket::{response::{Response, Responder, Body}, http::ContentType};
 use serde_json::Value as Json;
 use lazy_static::lazy_static;
 use serde::Serialize;
@@ -34,20 +34,20 @@ pub struct FileContent<'r> {
 pub enum Error {
     #[response(status = 500, content_type = "json")]
     InternalError(String),
-    #[response(status = 404, content_type = "json")]
-    FileNotFoundError(&'static str),
-    #[response(status = 404, content_type = "json")]
-    AliasNotFoundError(&'static str),
-    #[response(status = 404, content_type = "json")]
-    IDNotFoundError(&'static str),
     #[response(status = 400, content_type = "json")]
-    InvalidAliasRemoval(&'static str),
+    FileNotFound(&'static str),
     #[response(status = 400, content_type = "json")]
-    InvalidAliasAddition(&'static str),
+    AliasNotFound(String),
     #[response(status = 400, content_type = "json")]
-    InvalidStreamHashes(&'static str),
+    IdNotFound(String),
     #[response(status = 400, content_type = "json")]
-    InvalidFile(&'static str),
+    StreamHashesNotFound(&'static str),
+    #[response(status = 400, content_type = "json")]
+    InvalidMediaFile(&'static str),
+    #[response(status = 400, content_type = "json")]
+    AliasesAlreadyExist(&'static str),
+    #[response(status = 400, content_type = "json")]
+    AliasDoesNotMatchId(String),
 }
 
 #[derive(Serialize)]
@@ -84,12 +84,10 @@ impl Content {
         }.to_json(); }
         Self::Okay(&CON)
     }
-    pub fn stream_hashes<'a>(
-        iter: impl Iterator<Item = (
-            impl Serialize + Hash + Eq,
-            &'a [String],
-        )>
-    ) -> Self
+    pub fn stream_hashes<'a>(iter: impl Iterator<Item = (
+        impl Serialize + Hash + Eq,
+        &'a [String],
+    )>) -> Self
     {
         Self::StreamHashes(Field {
             content: iter.collect::<HashMap<_, _>>(),
@@ -97,12 +95,10 @@ impl Content {
             status: true,
         }.to_json())
     }
-    pub fn alias_list(
-        iter: impl Iterator<Item = (
-            impl Serialize + Hash + Eq,
-            Vec<String>,
-        )>
-    ) -> Self
+    pub fn alias_list(iter: impl Iterator<Item = (
+        impl Serialize + Hash + Eq,
+        Vec<String>,
+    )>) -> Self
     {
         Self::AliasList(Field {
             content: iter.collect::<HashMap<_, _>>(),
@@ -117,34 +113,26 @@ impl Content {
             status: true,
         }.to_json())
     }
-    fn str_content(c: &str) -> String {
-        Field {
-            content: c,
-            error: Json::Null,
-            status: true,
-        }.to_json()
-    }
 }
 
 impl<'r> FileContent<'r> {
-    pub fn new(value: core::ROFile<'r>) -> Result<Option<Self>, core::Error> {
-        Option::<Self>::try_from(value)
+    pub fn new(value: core::ROFile<'r>) -> Result<Self, core::Error> {
+        Self::try_from(value)
     }
 }
 
-impl<'r> TryFrom<core::ROFile<'r>> for Option<FileContent<'r>> {
+impl<'r> TryFrom<core::ROFile<'r>> for FileContent<'r> {
     type Error = core::Error;
     fn try_from(value: core::ROFile<'r>) -> Result<Self, Self::Error> {
         let len = value.len()?;
         let ext = value.extension();
         match value.into_read() {
             Err(e) => Err(e),
-            Ok(None) => Ok(None),
-            Ok(Some(r)) => Ok(Some(FileContent {
+            Ok(r) => Ok(FileContent {
                 len: len,
                 ext: ext,
                 reader: Box::new(r),
-            })),
+            }),
         }
     }
 }
@@ -166,62 +154,116 @@ impl<'r> Responder<'r> for FileContent<'r> {
     }
 }
 
-impl Error {
-    pub fn internal(value: core::Error) -> Self {
-        Self::InternalError(Field {
-            content: Json::Null,
-            error: InternalError::from(&value),
-            status: true,
-        }.to_json())
-    }
-    fn str_err(e: &str) -> String {
-        Field {
-            content: Json::Null,
-            error: e,
-            status: true,
-        }.to_json()
-    }
-    pub fn file_not_found() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-                "The requested file could not be found."
-        ); }
-        Self::FileNotFoundError(&ERR)
-    }
-    pub fn alias_not_found() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The requested file could not be found."
-        ); }
-        Self::AliasNotFoundError(&ERR)
-    }
-    pub fn id_not_found() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The requested file could not be found."
-        ); }
-        Self::IDNotFoundError(&ERR)
-    }
-    pub fn invalid_alias_removal() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The requested file could not be found."
-        ); }
-        Self::InvalidAliasRemoval(&ERR)
-    }
-    pub fn invalid_alias_addition() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The requested file could not be found."
-        ); }
-        Self::InvalidAliasAddition(&ERR)
-    }
-    pub fn invalid_stream_hashes() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The provided stream hash values were invalid."
-        ); }
-        Self::InvalidStreamHashes(&ERR)
-    }
-    pub fn invalid_file() -> Self {
-        lazy_static! { static ref ERR: String = Error::str_err(
-            "The provided file was found to be invalid."
-        ); }
-        Self::InvalidFile(&ERR)
+impl From<core::Error> for Error {
+    fn from(value: core::Error) -> Self {
+        
+        #[derive(Serialize)]
+        struct ErrorInner<T> {
+            content: T,
+            text: &'static str,
+            kind: &'static str,
+        }
+        #[derive(Serialize)]
+        struct IdNotFound {
+            id: u32,
+        }
+        #[derive(Serialize)]
+        struct AliasNotFound {
+            alias: String,
+        }
+        #[derive(Serialize)]
+        struct BothNotFound {
+            id: u32,
+            alias: String,
+        }
+
+        lazy_static! {
+            static ref STREAM_HASHES_NOT_FOUND: String = Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: Json::Null,
+                    text: "All provided stream hash values could not be located.",
+                    kind: "StreamHashesNotFound",
+                },
+                status: true
+            }.to_json();
+            static ref FILE_NOT_FOUND: String = Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: Json::Null,
+                    text: "The requested file could not be located on the server.",
+                    kind: "FileNotFound",
+                },
+                status: true
+            }.to_json();
+            static ref INVALID_MEDIA_FILE: String = Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: Json::Null,
+                    text: "The provided file was not recognized as media by the server.",
+                    kind: "InvalidMediaFile",
+                },
+                status: true
+            }.to_json();
+            static ref ALIASES_ALREADY_EXIST: String = Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: Json::Null,
+                    text: "At least one of the provided aliases already exist on the server.",
+                    kind: "AliasesAlreadyExist",
+                },
+                status: true
+            }.to_json();
+        }
+        
+        match value {
+            core::Error::StreamHashesNotFound => Self::StreamHashesNotFound(
+                &STREAM_HASHES_NOT_FOUND
+            ),
+            core::Error::FileNotFound => Self::FileNotFound(&FILE_NOT_FOUND),
+            core::Error::IdNotFound(id) => Self::IdNotFound(Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: IdNotFound { id: id },
+                    text: "The provided ID did not exist on the server.",
+                    kind: "IDNotFound",
+                },
+                status: true,
+            }.to_json()),
+            core::Error::AliasNotFound(alias) => Self::AliasNotFound(Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: AliasNotFound { alias: alias },
+                    text: "The provided Alias did not exist on the server.",
+                    kind: "AliasNotFound",
+                },
+                status: true,
+            }.to_json()),
+            core::Error::AliasesAlreadyExist => Self::AliasesAlreadyExist(
+                &ALIASES_ALREADY_EXIST
+            ),
+            core::Error::AliasDoesNotMatchId(alias, id) => Self::AliasDoesNotMatchId(Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: BothNotFound { id: id, alias: alias },
+                    text: "The provided Alias matches a different id.",
+                    kind: "AliasDoesNotMatchID",
+                },
+                status: true,
+            }.to_json()),
+            core::Error::InvalidMediaFile => Self::InvalidMediaFile(
+                &INVALID_MEDIA_FILE
+            ),
+            any => Self::InternalError(Field {
+                content: Json::Null,
+                error: ErrorInner {
+                    content: InternalError::from(&any),
+                    text: "Something went wrong!",
+                    kind: "Internal",
+                },
+                status: true,
+            }.to_json()),
+        }
     }
 }
 

@@ -1,3 +1,8 @@
+use std::{time::SystemTime, path::{PathBuf}, io::{Read, ErrorKind}, fs::File as StdFile, sync::{RwLock, RwLockReadGuard}};
+use {database::Database as DB, file_map::FileMap as FM};
+use chashmap::{CHashMap, ReadGuard, WriteGuard};
+use derive_more::{Deref, DerefMut};
+
 mod media_mixer;
 mod database;
 mod file_map;
@@ -9,11 +14,6 @@ pub type Database = database::sqlite_database::SqliteDatabase;
 
 type Result<T> = std::result::Result<T, Error>;
 
-use {database::Database as DB, file_map::FileMap as FM};
-use std::{time::SystemTime, path::{Path, PathBuf}, io::{Read, ErrorKind}, fs::File as StdFile};
-use derive_more::{Deref, DerefMut};
-use chashmap::{CHashMap, ReadGuard, WriteGuard};
-
 #[derive(Debug, Clone, Copy, Deref)]
 pub struct FileId<'db, 't, 'm> {
     #[deref]
@@ -23,10 +23,10 @@ pub struct FileId<'db, 't, 'm> {
     file_map: &'m FileMap,
 }
 
-#[derive(Debug, PartialEq, Hash)]
+#[derive(Debug)]
 pub struct File {
     path: PathBuf,
-    streams: Option<(Vec<String>, u64)>,
+    streams: RwLock<Option<(Vec<String>, u64)>>,
 }
 
 #[derive(Debug, Deref)]
@@ -54,6 +54,8 @@ struct Reader<'t> {
     file: StdFile,
     rolock: ROFile<'t>
 }
+
+struct Streams<'a>(RwLockReadGuard<'a, Option<(Vec<String>, u64)>>);
 
 impl<'db, 't, 'm> FileId<'db, 't, 'm> {
     pub fn new(
@@ -95,64 +97,69 @@ impl<'db, 't, 'm> FileId<'db, 't, 'm> {
         database: &'db Database,
         file_table: &'t FileTable,
         file_map: &'m FileMap,
-    ) -> Result<Option<Self>>
+    ) -> Result<Self>
     {
         match database.id_exists(id)
             .map_err(|e| Error::database_err(e))?
         {
-            true => Ok(Some(Self {
+            true => Ok(Self {
                 id: id,
                 database: database,
                 file_table: file_table,
                 file_map: file_map,
-            })),
-            false => Ok(None),
+            }),
+            false => Err(Error::IdNotFound(id)),
         }
     }
 
     pub fn from_alias(
-        alias: &str,
+        alias: impl ToString + AsRef<str>,
         database: &'db Database,
         file_table: &'t FileTable,
         file_map: &'m FileMap,
-    ) -> Result<Option<Self>>
+    ) -> Result<Self>
     {
-        match database.get_id(alias)
+        match database.get_id(alias.as_ref())
             .map_err(|e| Error::database_err(e))?
         {
-            Some(id) => Ok(Some(Self {
+            Some(id) => Ok(Self {
                 id: id,
                 database: database,
                 file_table: file_table,
                 file_map: file_map,
-            })),
-            None => Ok(None),
+            }),
+            None => Err(Error::AliasNotFound(alias.to_string())),
         }
     }
 
     pub fn with_aliases(
         &self,
         aliases: Vec<String>,
-    ) -> Result<Option<()>>
+    ) -> Result<()>
     {
         self.database.create_aliases(aliases, **self)
-            .map_err(|e| Error::database_err(e))
+            .map_err(|e| Error::database_err(e))?
+            .ok_or(Error::AliasesAlreadyExist)
     }
 
     pub fn without_aliases(
         &self,
         aliases: Vec<String>,
-    ) -> Result<Option<()>>
+    ) -> Result<()>
     {
         for alias in &aliases {
             match self.database.get_id(alias.as_ref()) {
                 Ok(Some(i)) if i == **self => (),
+                Ok(Some(i)) => return Err(
+                    Error::AliasDoesNotMatchId(alias.to_string(), i)
+                ),
                 Err(e) => return Err(Error::database_err(e)),
-                _ => return Ok(None),
+                Ok(None) => return Err(Error::AliasNotFound(alias.to_string())),
             };
         }
         self.database.remove_aliases(aliases, **self)
-            .map_err(|e| Error::database_err(e))
+            .map_err(|e| Error::database_err(e))?
+            .ok_or(Error::Infallible(Some("Aliases are already validated")))
     }
 
     pub fn get_aliases(&self) -> Result<Vec<String>> {
@@ -197,51 +204,65 @@ impl<'db, 't, 'm> FileId<'db, 't, 'm> {
     fn insert_file(&self, path: PathBuf) {
         self.file_table.insert(**self, File {
             path: path,
-            streams: None,
+            streams: RwLock::new(None),
         });
     }
 }
 
 impl File {
     // return None if the file has no streams
-    pub fn with_file(&mut self, file: impl Read) -> Result<Option<()>> {
-        unimplemented!()
+    pub fn with_file(&mut self, file: impl Read) -> Result<()> {
+        media_mixer::mux_file(file, &self.path)?
+            .ok_or(Error::InvalidMediaFile)
     }
 
     // return None if any of the hashes are not present in the file
     pub fn without_streams(
         &mut self,
         streams: Vec<String>,
-    ) -> Result<Option<()>>
+    ) -> Result<()>
     {
-        unimplemented!()
+        let mut indexes: Vec<usize> = Vec::with_capacity(streams.len());
+        let mut streams = streams.into_iter();
+        self.stream_hashes()?
+            .iter()
+            .enumerate()
+            .for_each(|(i, s)| 
+                if let Some(_) = streams.find(|x| x == s) {
+                    indexes.push(i);
+                }
+            );
+        if !(indexes.len() == indexes.capacity()) {
+            return Err(Error::StreamHashesNotFound);
+        }
+        Ok(
+            media_mixer::partial_demux_file(&indexes, &self.path)?
+        )
     }
 
-    // return None if the hashes are stale or empty
-    pub fn stream_hashes<'a>(&'a self) -> Result<Option<&'a [String]>> {
-        match &self.streams {
-            None => Ok(None),
-            Some(streams) =>
-        match self.modified_time()?
-        {
-            None => Ok(None),
-            Some(t) if t == streams.1 => Ok(Some(&streams.0)),
-            Some(_) => Ok(None),
-        }}
-    }
-
-    // return None if file does not exist
-    pub fn refresh_stream_hashes<'a>(
-        &'a mut self,
-    ) -> Result<Option<&'a [String]>> {
-        unimplemented!()
+    pub fn stream_hashes<'a>(
+        &'a self,
+    ) -> Result<impl std::ops::Deref<Target = [String]> + 'a>
+    {
+        let streams = self.streams.read().unwrap();
+        if let Some(s) = &*streams {
+            if s.1 == self.modified_time()?
+            {
+                return Ok(Streams(streams));
+            }
+        }
+        std::mem::drop(streams);
+        self.refresh_stream_hashes()?;
+        Ok(Streams(self.streams.read().unwrap()))
     }
 
     pub fn len(&self) -> Result<Option<u64>> {
         match self.path.metadata() {
             Ok(m) if m.len() == 0 => Ok(None),
             Ok(m) => Ok(Some(m.len())),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == ErrorKind::NotFound => Err(
+                Error::FileNotFound
+            ),
             Err(e) => Err(Error::FileSystemError(e)),
         }
     }
@@ -253,35 +274,48 @@ impl File {
             .flatten()
     }
 
-    pub fn json_probe(&mut self) -> Result<Option<serde_json::Value>> {
+    pub fn json_probe(&self) -> Result<serde_json::Value> {
         if !self.path.is_file() {
-            return Ok(None);
+            return Err(Error::FileNotFound);
         }
-        Ok(Some(
+        Ok(
             media_mixer::json_probe(&self.path)?
-        ))
+        )
     }
 
-    fn modified_time(&self) -> Result<Option<u64>> {
+    // return None if file does not exist
+    fn refresh_stream_hashes(&self) -> Result<()> {
+        *self.streams.write().unwrap() = Some((
+            media_mixer::try_hash_file(&self.path)?,
+            self.modified_time()?
+        ));
+        Ok(())
+    }
+
+    fn modified_time(&self) -> Result<u64> {
         match self.path.metadata()
             .map(|m| m.modified())
         {
-            Ok(Ok(m)) => Ok(Some(m
+            Ok(Ok(m)) => Ok(m
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_err(|e| Error::SystemTimeError(e))?
                 .as_secs()
-            )),
-            Err(e) | Ok(Err(e)) if e.kind() == ErrorKind::NotFound => Ok(None),
+            ),
+            Err(e) | Ok(Err(e)) if e.kind() == ErrorKind::NotFound => Err(
+                Error::FileNotFound
+            ),
             Err(e) | Ok(Err(e)) => Err(Error::FileSystemError(e)),
         }
     }
 }
 
 impl<'t> ROFile<'t> {
-    pub fn into_read(self) -> Result<Option<impl Read + 't>> {
+    pub fn into_read(self) -> Result<impl Read + 't> {
         match StdFile::open(&self.path) {
-            Ok(f) => Ok(Some(Reader { file: f, rolock: self })),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Ok(f) => Ok(Reader { file: f, rolock: self }),
+            Err(e) if e.kind() == ErrorKind::NotFound => Err(
+                Error::FileNotFound
+            ),
             Err(e) => Err(Error::FileSystemError(e)),
         }
     }
@@ -294,5 +328,15 @@ impl Read for Reader<'_> {
     ) -> std::result::Result<usize, std::io::Error>
     {
         (**self).read(buf)
+    }
+}
+
+impl<'a> std::ops::Deref for Streams<'a> {
+    type Target = [String];
+    fn deref(&self) -> &Self::Target {
+        match &*self.0 {
+            Some(s) => &s.0,
+            None => unreachable!(), // private type, should never happen
+        }
     }
 }

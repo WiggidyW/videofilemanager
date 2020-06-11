@@ -1,10 +1,8 @@
-use std::{sync::RwLock, fmt::{Display, Debug, self}, error::Error as StdError, ops::Deref, hash::Hash, iter, result::Result as StdResult};
-use rocket::{State, http::RawStr, response::Responder, data::Data, request::{FromRequest, FromParam, self}};
-use rocket_contrib::json::Json;
-use serde::{Serialize, Deserialize};
-use derive_more::Deref;
-use crate::core::{self, FileMap, FileTable, Database, FileId, File, ROFile, RWFile};
+use rocket::{State, http::RawStr, data::Data, request::FromParam};
+use crate::core::{self, FileMap, FileTable, Database, FileId};
+use std::{iter, result::Result as StdResult};
 use super::{FileContent, Content, Error};
+use rocket_contrib::json::Json;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -12,6 +10,7 @@ enum Id {
     Alias(String),
     Id(u32),
 }
+
 struct States<'db, 't, 'm> {
     database: &'db Database,
     file_table: &'t FileTable,
@@ -19,29 +18,25 @@ struct States<'db, 't, 'm> {
 }
 
 impl Id {
-    fn into_file_id<'db, 't, 'm>(
+    fn as_file_id<'db, 't, 'm>(
         &self,
         states: &States<'db, 't, 'm>,
     ) -> Result<FileId<'db, 't, 'm>>
     {
-        match self {
+        Ok(match self {
             Self::Alias(s) => FileId::from_alias(
-                    s,
-                    states.database,
-                    states.file_table,
-                    states.file_map,
-                )
-                .map_err(|e| Error::internal(e))?
-                .ok_or(Error::alias_not_found()),
+                s,
+                states.database,
+                states.file_table,
+                states.file_map,
+            )?,
             Self::Id(i) => FileId::from_id(
-                    *i,
-                    states.database,
-                    states.file_table,
-                    states.file_map,
-                )
-                .map_err(|e| Error::internal(e))?
-                .ok_or(Error::alias_not_found()),
-        }
+                *i,
+                states.database,
+                states.file_table,
+                states.file_map,
+            )?,
+        })
     }
     fn into_key(self) -> String {
         match self {
@@ -76,16 +71,19 @@ pub fn run<'db: 'static, 't: 'static, 'm: 'static>(
 
 #[get("/list")]
 fn list(states: State<States>) -> Result<Content> {
-    let list = FileId::all(states.database, states.file_table, states.file_map)
-        .map_err(|e| Error::internal(e))?
+    Ok(Content::alias_list(FileId::all(
+        states.database,
+        states.file_table,
+        states.file_map,
+    )?
         .into_iter()
         .map(|id| Ok((
             *id,
             id.get_aliases()?
         )))
-        .collect::<StdResult<Vec<(u32, Vec<String>)>, core::Error>>()
-        .map_err(|e| Error::internal(e))?;
-    Ok(Content::alias_list(list.into_iter()))
+        .collect::<StdResult<Vec<(u32, Vec<String>)>, core::Error>>()?
+        .into_iter()
+    ))
 }
 
 #[get("/files/<id>")]
@@ -94,62 +92,64 @@ fn get_file<'t>(
     states: State<States<'_, 't, '_>>,
 ) -> Result<FileContent<'t>>
 {
-    let file = id.into_file_id(&states)?
-        .ro_file()
-        .map_err(|e| Error::internal(e))?;
-    match FileContent::new(file) {
-        Err(e) => Err(Error::internal(e)),
-        Ok(None) => Err(Error::file_not_found()),
-        Ok(Some(f)) => Ok(f),
-    }
+    Ok(FileContent::new(
+        id.as_file_id(&states)?
+            .ro_file()?
+        )?
+    )
+}
+
+#[post("/files/<id>?push", data = "<data>")]
+fn push_file(id: Id, states: State<States>, data: Data) -> Result<Content> {
+    Ok(id.as_file_id(&states)?
+        .rw_file()?
+        .with_file(data.open())
+        .map(|_| Content::okay())?
+    )
+}
+
+#[post("/files/<id>?pop", format = "json", data = "<list>")]
+fn pop_file(
+    id: Id,
+    states: State<States>,
+    list: Json<Vec<String>>,
+) -> Result<Content>
+{
+    Ok(id.as_file_id(&states)?
+        .rw_file()?
+        .without_streams(list.into_inner())
+        .map(|_| Content::okay())?
+    )
 }
 
 #[get("/streams/<id>")]
 fn get_stream_hashes(id: Id, states: State<States>) -> Result<Content> {
-    let fid = id.into_file_id(&states)?;
-    match fid.ro_file()
-        .map_err(|e| Error::internal(e))?
+    Ok(id.as_file_id(&states)?
+        .ro_file()?
         .stream_hashes()
-    {
-        Err(e) => return Err(Error::internal(e)),
-        Ok(None) => (),
-        Ok(Some(h)) => return Ok(Content::stream_hashes(
-            iter::once((id.into_key(), h))
-        ))
-    };
-    match fid.rw_file()
-        .map_err(|e| Error::internal(e))?
-        .refresh_stream_hashes()
-    {
-        Err(e) => Err(Error::internal(e)),
-        Ok(None) => Err(Error::file_not_found()),
-        Ok(Some(h)) => Ok(Content::stream_hashes(
-            iter::once((id.into_key(), h))
-        ))
-    }
+        .map(|hashes| Content::stream_hashes(
+            iter::once((id.into_key(), &*hashes))
+        ))?
+    )
 }
 
 #[get("/probe/<id>")]
-fn get_probe_id(id: Id, states: State<States>) -> Result<Content> {
-    match id.into_file_id(&states)?
-        .rw_file()
-        .map_err(|e| Error::internal(e))?
+fn get_probe(id: Id, states: State<States>) -> Result<Content> {
+    Ok(id.as_file_id(&states)?
+        .rw_file()?
         .json_probe()
-    {
-        Err(e) => Err(Error::internal(e)),
-        Ok(None) => Err(Error::file_not_found()),
-        Ok(Some(json)) => Ok(Content::json_probe(json)),
-    }
+        .map(|json| Content::json_probe(json))?
+    )
 }
 
 #[get("/aliases/<id>")]
 fn get_aliases(id: Id, states: State<States>) -> Result<Content> {
-    match id.into_file_id(&states)?
+    Ok(id.as_file_id(&states)?
         .get_aliases()
-    {
-        Err(e) => Err(Error::internal(e)),
-        Ok(a) => Ok(Content::alias_list(iter::once((id.into_key(), a)))),
-    }
+        .map(|aliases| Content::alias_list(
+            iter::once((id.into_key(), aliases))
+        ))?
+    )
 }
 
 #[post("/aliases/<id>?push", format = "json", data = "<list>")]
@@ -159,13 +159,10 @@ fn push_aliases(
     states: State<States>,
 ) -> Result<Content>
 {
-    match id.into_file_id(&states)?
+    Ok(id.as_file_id(&states)?
         .with_aliases(list.into_inner())
-    {
-        Err(e) => Err(Error::internal(e)),
-        Ok(None) => Err(Error::invalid_alias_addition()),
-        Ok(Some(())) => Ok(Content::okay()),
-    }
+        .map(|_| Content::okay())?
+    )
 }
 
 #[post("/aliases/<id>?pop", format = "json", data = "<list>")]
@@ -175,11 +172,8 @@ fn pop_aliases(
     states: State<States>,
 ) -> Result<Content>
 {
-    match id.into_file_id(&states)?
+    Ok(id.as_file_id(&states)?
         .without_aliases(list.into_inner())
-    {
-        Err(e) => Err(Error::internal(e)),
-        Ok(None) => Err(Error::invalid_alias_removal()),
-        Ok(Some(())) => Ok(Content::okay()),
-    }
+        .map(|_| Content::okay())?
+    )
 }

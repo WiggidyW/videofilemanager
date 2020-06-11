@@ -16,6 +16,14 @@ pub enum Error {
 pub fn mux_file(
     source: impl Read,
     target: impl AsRef<Path>,
+) -> Result<Option<()>, Error>
+{
+    unimplemented!()
+}
+
+pub fn partial_demux_file(
+    target_hashes: &[usize],
+    target: impl AsRef<Path>,
 ) -> Result<(), Error>
 {
     unimplemented!()
