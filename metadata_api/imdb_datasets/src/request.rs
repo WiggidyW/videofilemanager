@@ -72,5 +72,3 @@ const _: () = {
 	imdb_dataset!(crate::model::NameBasics, "http://localhost:12794/imdb-datasets/name.basics.tsv.gz");
 	imdb_dataset!(crate::model::TitlePrincipals, "http://localhost:12794/imdb-datasets/title.principals.tsv.gz");
 };
-
-
