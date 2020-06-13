@@ -1,7 +1,6 @@
 use tokio::{stream::{StreamMap, Stream as AsyncStream}};
 use std::{io, pin::Pin, task::{Poll, Context}};
 use async_compression::stream::GzipDecoder;
-use futures::future::try_join_all;
 use bytes::{Bytes, BytesMut};
 use crate::Dataset;
 
@@ -9,7 +8,7 @@ pub async fn request_stream() -> Result<
     impl AsyncStream<Item = Result<(Dataset, Bytes), io::Error>> + Unpin,
     reqwest::Error,
 > {
-    try_join_all(
+    futures::future::try_join_all(
         Dataset::iter().map(|d| async move {
             reqwest::get(reqwest::Url::from(d))
                 .await?
