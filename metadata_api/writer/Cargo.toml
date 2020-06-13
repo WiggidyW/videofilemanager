@@ -4,11 +4,13 @@ version = "0.1.0"
 authors = ["WiggidyW <rlr0017@auburn.edu>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+async-std-runtime = ["mongodb/async-std-runtime"]
+tokio-runtime = ["mongodb/tokio-runtime"]
 
 [dependencies]
-serde = { version = "^1.0" }
+derive_more = { version = "^0.99" }
 async-trait = { version = "^0.1" }
 mongodb = { version = "^1.0" }
-derive_more = { version = "^0.99" }
+serde = { version = "^1.0" }
 smol = { version = "^0.1" }
