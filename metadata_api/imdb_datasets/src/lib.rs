@@ -1,12 +1,5 @@
-mod streams;
+mod stream;
+mod kind;
 
-#[derive(Debug, Clone, Copy)]
-enum Dataset {
-    NameBasics,
-    TitleAkas,
-    TitleBasics,
-    TitleCrew,
-    TitleEpisode,
-    TitlePrincipals,
-    TitleRatings,
-}
+pub(crate) use kind::Dataset;
+pub(crate) use stream::request_stream;

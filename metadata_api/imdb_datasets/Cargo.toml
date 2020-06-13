@@ -10,5 +10,6 @@ edition = "2018"
 reqwest = { path = "../../../reqwest", features = ["rustls-tls", "stream"], default-features = false }
 async-compression = { version = "^0.3", features = ["gzip", "stream"], default-features = false }
 derive_more = { version = "^0.99" }
-futures-core = { version = "^0.3" }
+futures = { version = "^0.3" }
+tokio = { version = "^0.2", features = ["stream", "rt-threaded", "macros"] }
 bytes = { version = "^0.5" }
