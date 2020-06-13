@@ -1,6 +1,7 @@
 use reqwest::Url;
+use serde::Serialize;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub enum Dataset {
     NameBasics,
     TitleAkas,

@@ -13,3 +13,5 @@ derive_more = { version = "^0.99" }
 futures = { version = "^0.3" }
 tokio = { version = "^0.2", features = ["stream", "rt-threaded", "macros"] }
 bytes = { version = "^0.5" }
+writer = { path = "../writer", features = ["tokio-runtime"] }
+serde = { version = "^1.0", features = ["derive"] }

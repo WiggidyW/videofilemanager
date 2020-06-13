@@ -1,3 +1,4 @@
 mod writer;
 
-pub type Writer = writer::MongoWriter;
+pub use writer::Writer;
+pub use writer::{MongoWriter, MongoTransaction, MongoError};

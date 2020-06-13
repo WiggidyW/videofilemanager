@@ -9,8 +9,10 @@ use derive_more::{Display, Error, Constructor, From};
 
 use mongodb::bson;
 
+// pub struct ImplWriter<T>(T);
+
 #[async_trait]
-trait Writer {
+pub trait Writer: Sized {
     type Error: StdError + 'static;
     type Transaction;
     async fn transaction(
@@ -28,7 +30,38 @@ trait Writer {
     ) -> Result<(), Self::Error>;
 }
 
-#[derive(Debug, Constructor)]
+// impl<T: Writer> ImplWriter<T> {
+//     pub fn new(
+//         args: <T as Writer>::Args,
+//     ) -> Result<Self, <T as Writer>::Error>
+//     {
+//         T::new(args).map(|t| Self(t))
+//     }
+//     pub async fn transaction(
+//         &self,
+//         kind: &str,
+//     ) -> Result<<T as Writer>::Transaction, <T as Writer>::Error>
+//     {
+//         self.0.transaction(kind).await
+//     }
+//     pub async fn insert<D: Serialize, I: IntoIterator<Item = D> + Send>(
+//         &self,
+//         transaction: &<T as Writer>::Transaction,
+//         data: I,
+//     ) -> Result<(), <T as Writer>::Error>
+//     {
+//         self.0.insert(transaction, data).await
+//     }
+//     pub async fn commit(
+//         &self,
+//         transaction: <T as Writer>::Transaction,
+//     ) -> Result<(), <T as Writer>::Error>
+//     {
+//         self.0.commit(transaction).await
+//     }
+// }
+
+#[derive(Debug)]
 pub struct MongoWriter {
     inner: mongodb::Database,
 }
