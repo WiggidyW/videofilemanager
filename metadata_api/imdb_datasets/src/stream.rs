@@ -2,19 +2,14 @@ use std::io;
 use std::pin::Pin;
 use std::task::Poll;
 use std::task::Context;
-
 use tokio::stream::Stream as AsyncStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::stream::StreamExt;
-
 use async_compression::stream::GzipDecoder;
-
 use bytes::Bytes;
 use bytes::BytesMut;
-
 use futures::future::try_join_all;
-
 use crate::Dataset;
 use crate::Error;
 
