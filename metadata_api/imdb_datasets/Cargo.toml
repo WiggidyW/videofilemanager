@@ -13,5 +13,5 @@ derive_more = { version = "^0.99" }
 futures = { version = "^0.3" }
 tokio = { version = "^0.2", features = ["stream", "rt-threaded", "sync"] }
 bytes = { version = "^0.5" }
-db_writer = { path = "../db_writer", features = ["tokio-runtime"] }
 serde = { version = "^1.0", features = ["derive"] }
+async-trait = { version = "^0.1" }

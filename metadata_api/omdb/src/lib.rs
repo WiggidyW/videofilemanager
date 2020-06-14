@@ -1,9 +1,20 @@
 use std::error::Error as StdError;
+use async_trait::async_trait;
+use serde::Serialize;
 use reqwest::Url;
-use db_writer::DbWriter;
 mod error;
 
 pub use crate::error::Error;
+
+#[async_trait]
+pub trait DbWriter {
+    type Error: StdError + Send + 'static;
+    async fn insert<D: Serialize>(
+        &self,
+        namespace: &str,
+        data: D,
+    ) -> Result<(), Self::Error>;
+}
 
 pub async fn get<W: DbWriter>(
     writer: &W,
@@ -25,7 +36,7 @@ pub async fn get<W: DbWriter>(
         .bytes()
         .await
         .map(|b| serde_json::from_slice(&b))??;
-    writer.insert_one("omdb", json)
+    writer.insert("omdb", json)
         .await
         .map_err(|e| Error::writer(e))
 }

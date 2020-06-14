@@ -5,7 +5,27 @@ use tokio::stream::Stream as AsyncStream;
 use tokio::stream::StreamExt;
 use bytes::Bytes;
 use std::sync::Arc;
-use db_writer::DbWriter;
+use std::fmt::Debug;
+use async_trait::async_trait;
+
+#[async_trait]
+pub trait DbWriter: Send + Sync + 'static {
+    type Error: std::error::Error + Send + 'static;
+    type Transaction: Debug + Send + Sync + 'static;
+    async fn transaction(
+        &self,
+        kind: &str,
+    ) -> Result<Self::Transaction, Self::Error>;
+    async fn insert<D: Serialize, I: IntoIterator<Item = D> + Send>(
+        &self,
+        transaction: &Self::Transaction,
+        data: I,
+    ) -> Result<(), Self::Error>;
+    async fn commit(
+        &self,
+        transaction: Self::Transaction,
+    ) -> Result<(), Self::Error>;
+}
 
 #[derive(Serialize)]
 struct Row<'a> {
