@@ -1,6 +1,9 @@
 pub mod error;
-
 mod ost;
+mod omdb;
+
+pub use ost::Params as OpenSubtitlesParams;
+pub use omdb::Params as OmdbParams;
 
 use error::Error;
 use serde_json::Value as Json;
@@ -27,8 +30,7 @@ pub trait Database {
 pub trait Params {
     const KIND: &'static str;
     fn parse(&self) -> Result<reqwest::Request, error::ParamsError>;
-    fn pre_validate(&self, data: Bytes) -> Result<(), error::ResponseError>;
-    fn post_validate(&self, data: &Json) -> Result<(), error::ResponseError>;
+    fn validate(&self, data: Bytes) -> Result<(), error::ResponseError>;
 }
 
 impl Client {
@@ -47,14 +49,13 @@ impl Client {
             .error_for_status()?
             .bytes()
             .await?;
-        params.pre_validate(bytes.clone())?;
+        params.validate(bytes.clone())?;
         let json: Json = serde_json::from_slice(&bytes)
             .map_err(|e| error::ResponseError::new(
                 "the response by the server was not valid Json",
                 error::ResponseErrorKind::InvalidJson,
                 Some(e),
             ))?;
-        params.post_validate(&json)?;
         database
             .insert(
                 Data::new(P::KIND, json)?
