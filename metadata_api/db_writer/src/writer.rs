@@ -19,6 +19,11 @@ pub trait DbWriter: Debug + Send + Sync + 'static {
         transaction: &Self::Transaction,
         data: I,
     ) -> Result<(), Self::Error>;
+    async fn insert_one<D: Serialize + Send + Sync>(
+        &self,
+        namespace: &str,
+        data: D,
+    ) -> Result<(), Self::Error>;
     async fn commit(
         &self,
         transaction: Self::Transaction,
@@ -80,6 +85,30 @@ impl DbWriter for MongoWriter {
             )
             .collect::<Result<Vec<bson::Document>, Self::Error>>()?;
         transaction.inner.insert_many(data, None)
+            .await?;
+        Ok(())
+    }
+    async fn insert_one<D: Serialize + Send + Sync>(
+        &self,
+        namespace: &str,
+        data: D,
+    ) -> Result<(), Self::Error>
+    {
+        self.inner.collection(namespace)
+            .insert_one(bson::ser::to_bson(&data)
+                .map_err(|e| MongoError::from(e))
+                .and_then(|data| match data {
+                    bson::Bson::Document(mut doc) => {
+                        doc.insert("insert_time", SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)?
+                            .as_secs()
+                        );
+                        Ok(doc)
+                    },
+                    _ => Err(MongoError::BsonAsDocumentError(data)),
+                })?,
+                None
+            )
             .await?;
         Ok(())
     }

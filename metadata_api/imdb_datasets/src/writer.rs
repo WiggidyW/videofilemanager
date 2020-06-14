@@ -34,8 +34,8 @@ impl<'a> Row<'a> {
 }
 
 impl<W: DbWriter> Writer<W> {
-    pub fn new(writer: W) -> Self {
-        Self(Arc::new(writer))
+    pub fn new(writer: Arc<W>) -> Self {
+        Self(writer)
     }
     pub async fn write<S>(self, stream: S) -> Result<(), Error>
     where

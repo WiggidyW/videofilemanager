@@ -1,0 +1,11 @@
+[package]
+name = "omdb"
+version = "0.1.0"
+authors = ["Wiggidy <ronaldriggles@riseup.net>"]
+edition = "2018"
+
+[dependencies]
+reqwest = { path = "../../../reqwest", features = ["rustls-tls"], default-features = false }
+serde_json = { version = "^1.0" }
+db_writer = { path = "../db_writer" }
+derive_more = { version = "^0.99" }
