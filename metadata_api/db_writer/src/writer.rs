@@ -1,22 +1,15 @@
 use std::error::Error as StdError;
 use std::time::{self, SystemTime};
-
+use std::fmt::Debug;
 use serde::Serialize;
-
 use async_trait::async_trait;
-
 use derive_more::{Display, Error, Constructor, From};
-
 use mongodb::bson;
 
-pub struct ImplWriter<T>(T);
-
 #[async_trait]
-pub trait Writer: Sized {
-    type Error: StdError + 'static;
-    type Args;
-    type Transaction;
-    fn new(args: Self::Args) -> Result<Self, Self::Error>;
+pub trait DbWriter: Debug + Send + Sync + 'static {
+    type Error: StdError + Send + 'static;
+    type Transaction: Debug + Send + Sync + 'static;
     async fn transaction(
         &self,
         kind: &str,
@@ -30,37 +23,6 @@ pub trait Writer: Sized {
         &self,
         transaction: Self::Transaction,
     ) -> Result<(), Self::Error>;
-}
-
-impl<T: Writer> ImplWriter<T> {
-    pub fn new(
-        args: <T as Writer>::Args,
-    ) -> Result<Self, <T as Writer>::Error>
-    {
-        T::new(args).map(|t| Self(t))
-    }
-    pub async fn transaction(
-        &self,
-        kind: &str,
-    ) -> Result<<T as Writer>::Transaction, <T as Writer>::Error>
-    {
-        self.0.transaction(kind).await
-    }
-    pub async fn insert<D: Serialize, I: IntoIterator<Item = D> + Send>(
-        &self,
-        transaction: &<T as Writer>::Transaction,
-        data: I,
-    ) -> Result<(), <T as Writer>::Error>
-    {
-        self.0.insert(transaction, data).await
-    }
-    pub async fn commit(
-        &self,
-        transaction: <T as Writer>::Transaction,
-    ) -> Result<(), <T as Writer>::Error>
-    {
-        self.0.commit(transaction).await
-    }
 }
 
 #[derive(Debug)]
@@ -87,13 +49,9 @@ pub enum MongoError {
 }
 
 #[async_trait]
-impl Writer for MongoWriter {
+impl DbWriter for MongoWriter {
     type Error = MongoError;
-    type Args = mongodb::Database;
     type Transaction = MongoTransaction;
-    fn new(args: Self::Args) -> Result<Self, Self::Error> {
-        Ok(Self { inner: args })
-    }
     async fn transaction(
         &self,
         kind: &str,

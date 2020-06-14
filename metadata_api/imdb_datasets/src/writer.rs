@@ -5,6 +5,7 @@ use tokio::stream::Stream as AsyncStream;
 use tokio::stream::StreamExt;
 use bytes::Bytes;
 use std::sync::Arc;
+use db_writer::DbWriter;
 
 #[derive(Serialize)]
 struct Row<'a> {
@@ -12,7 +13,7 @@ struct Row<'a> {
     data: Vec<&'a str>,
 }
 
-pub struct Writer(Arc<writer::Writer>);
+pub struct Writer<W>(Arc<W>);
 
 impl<'a> Row<'a> {
     fn try_from_many(
@@ -20,12 +21,20 @@ impl<'a> Row<'a> {
         bytes: &'a Bytes,
     ) -> Result<Vec<Self>, Error>
     {
-        unimplemented!()
+        let rows = std::str::from_utf8(bytes)?
+            .split('\n')
+            .map(|row| row.split('\t'))
+            .map(|row| Row {
+                kind: kind,
+                data: row.collect()
+            })
+            .collect();
+        Ok(rows)
     }
 }
 
-impl Writer {
-    pub fn new(writer: writer::Writer) -> Self {
+impl<W: DbWriter> Writer<W> {
+    pub fn new(writer: W) -> Self {
         Self(Arc::new(writer))
     }
     pub async fn write<S>(self, stream: S) -> Result<(), Error>
@@ -33,7 +42,9 @@ impl Writer {
         S: AsyncStream<Item = Result<(Dataset, Bytes), Error>> + Unpin,
     {
         let transaction = Arc::new(
-            self.0.transaction("imdb_datasets").await?
+            self.0.transaction("imdb_datasets")
+                .await
+                .map_err(|e| Error::writer(e))?
         );
         let writer = self.0.clone();
         let tasks = stream.map(|res| {
@@ -43,7 +54,7 @@ impl Writer {
                 let rows = Row::try_from_many(kind, &bytes)?;
                 w.insert(&tx, rows)
                     .await
-                    .map_err(|e| Error::from(e))
+                    .map_err(|e| Error::writer(e))
             })
         })
             .collect::<Vec<_>>()
@@ -51,7 +62,9 @@ impl Writer {
         for task in tasks {
             task.await??;
         }
-        self.0.commit(Arc::try_unwrap(transaction).unwrap()).await?;
+        self.0.commit(Arc::try_unwrap(transaction).unwrap())
+            .await
+            .map_err(|e| Error::writer(e))?;
         Ok(())
     }
 }

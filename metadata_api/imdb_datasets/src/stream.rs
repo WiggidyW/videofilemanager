@@ -17,18 +17,19 @@ pub async fn request_stream() -> Result<
     impl AsyncStream<Item = Result<(Dataset, Bytes), Error>> + Unpin,
     Error,
 > {
-    let responses = try_join_all(Dataset::iter()
-        .map(|d| async move {
-            reqwest::get(reqwest::Url::from(d))
-                .await?
-                .error_for_status()
-                .map(|res| Response {
-                    inner: res,
-                    kind: d,
-                })
-                .map_err(|e| Error::from(e))
-        })
-    )
+    let responses = try_join_all(
+        Dataset::iter()
+            .map(|d| async move {
+                reqwest::get(reqwest::Url::from(d))
+                    .await?
+                    .error_for_status()
+                    .map(|res| Response {
+                        inner: res,
+                        kind: d,
+                    })
+                    .map_err(|e| Error::from(e))
+            })
+        )
         .await?;
     Ok(Stream::new(responses.into_iter()))
 }

@@ -24,23 +24,6 @@ impl Dataset {
             Dataset::TitleRatings,
         ].into_iter()
     }
-    pub fn count() -> usize {
-        7
-    }
-}
-
-impl AsRef<usize> for Dataset {
-    fn as_ref(&self) -> &usize {
-        match self {
-            Self::NameBasics => &0,
-            Self::TitleAkas => &1,
-            Self::TitleBasics => &2,
-            Self::TitleCrew => &3,
-            Self::TitleEpisode => &4,
-            Self::TitlePrincipals => &5,
-            Self::TitleRatings => &6,
-        }
-    }
 }
 
 impl From<Dataset> for reqwest::Url {
