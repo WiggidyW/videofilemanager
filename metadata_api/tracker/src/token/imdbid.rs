@@ -2,6 +2,7 @@ use lazy_static::lazy_static;
 use std::sync::RwLock;
 use std::collections::HashMap;
 
+#[derive(Clone, Copy)]
 pub struct ImdbId(u32);
 
 lazy_static! {
