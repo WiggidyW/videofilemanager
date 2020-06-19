@@ -16,3 +16,4 @@ derive_more = "^0.99"
 derive-new = "^0.5"
 lazy_static = "^1.4"
 reqwest = { version = "^0.10", default-features = false, features = ["rustls-tls"] }
+sqlx = { version = "^0.3", features = ["macros", "sqlite"] }
