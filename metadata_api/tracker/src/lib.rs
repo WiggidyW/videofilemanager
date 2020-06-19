@@ -1,2 +1,3 @@
-pub mod client;
-pub mod token;
+#![allow(dead_code)]
+
+pub mod pipe;

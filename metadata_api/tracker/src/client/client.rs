@@ -23,6 +23,13 @@ pub trait Client<'de, P> {
     ) -> Result<(Self::Output, ShouldRefresh), Self::Error>;
 }
 
+#[async_trait]
+pub trait Pipe<T, D> {
+    type Error: std::error::Error + 'static;
+    type Stream: Stream<Item = Result<D, Self::Error>>;
+    async fn get(&self, token: T) -> Result<Self::Stream, Self::Error>;
+}
+
 // pub struct Pillar<C, P> {
 //     client: Arc<C>,
 //     conn: mongodb::Collection,
