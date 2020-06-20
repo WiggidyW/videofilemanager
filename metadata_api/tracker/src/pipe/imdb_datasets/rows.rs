@@ -3,16 +3,15 @@ use super::{DatasetKind, Rows};
 use bytes::{Bytes, BytesMut};
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-use futures::stream::StreamExt;
+use futures::stream::{Stream, StreamExt};
+use futures::future;
+use std::sync::Mutex;
 
 pub struct RowsPipe<P> {
-    inner: Arc<P>,
-    streams: Mutex<Vec<JoinHandle<()>>>,
+    inner: P,
+    tasks: Mutex<Vec<JoinHandle<()>>>,
 }
-
-struct Buf(BytesMut);
 
 impl<P> RowsPipe<P>
 where
@@ -21,8 +20,8 @@ where
 {
     pub fn new(pipe: P) -> Self {
         Self {
-            inner: Arc::new(pipe),
-            streams: Mutex::new(Vec::with_capacity(7)),
+            inner: pipe,
+            tasks: Mutex::new(Vec::with_capacity(7)),
         }
     }
 }
@@ -31,41 +30,29 @@ where
 impl<P, T> Pipe<T, Rows> for RowsPipe<P>
 where
     P: Pipe<DatasetKind, Bytes> + 'static,
-    <P as Pipe<DatasetKind, Bytes>>::Stream: Send,
     T: Send + 'static,
 {
     type Error = <P as Pipe<DatasetKind, Bytes>>::Error;
     type Stream = mpsc::UnboundedReceiver<Result<Rows, Self::Error>>;
     async fn get(&self, _: T) -> Result<Self::Stream, Self::Error> {
-        let mut streams = self.streams.lock().unwrap();
-        streams.clear(); // drops all existing streams
+        self.tasks.lock().unwrap().clear(); // drops all existing streams
+        let streams = future::try_join_all(
+            DatasetKind::iter()
+                .map(|kind| async move {
+                    match self.inner.get(kind).await {
+                        Ok(stream) => Ok((stream, kind)),
+                        Err(e) => Err(e),
+                    }
+                })
+            )
+            .await?;
         let (tx, rx) = mpsc::unbounded_channel();
-        *streams = vec![
-            DatasetKind::TitlePrincipals,
-            DatasetKind::NameBasics,
-            DatasetKind::TitleAkas,
-            DatasetKind::TitleBasics,
-            DatasetKind::TitleCrew,
-            DatasetKind::TitleEpisode,
-            DatasetKind::TitleRatings,
-        ]
+        *self.tasks.lock().unwrap() = streams
             .into_iter()
-            .map(|kind| {
-                let pipe = self.inner.clone();
+            .map(|(stream, kind)| {
                 let tx = tx.clone();
                 tokio::spawn(async move {
-                    let mut buf = Buf::new();
-                    let mut stream = match pipe.get(kind).await {
-                        Ok(s) => s,
-                        Err(e) => return tx.send(Err(e)).unwrap(),
-                    };
-                    while let Some(b) = stream.next().await {
-                        let b = b.map(|b| {
-                            buf.extend(b);
-                            buf.split_rows(kind)
-                        });
-                        tx.send(b).unwrap();
-                    }
+                    RowTransceiver::new(stream, kind, tx).run().await;
                 })
             })
             .collect();
@@ -73,26 +60,67 @@ where
     }
 }
 
-impl Buf {
-    fn new() -> Self {
-        Self(BytesMut::new())
+struct RowTransceiver<S, E> {
+    buf: BytesMut,
+    stream: S,
+    kind: DatasetKind,
+    tx: mpsc::UnboundedSender<Result<Rows, E>>,
+}
+
+impl<S, E> RowTransceiver<S, E>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+    E: std::fmt::Debug,
+{
+    fn new(stream: S, kind: DatasetKind, tx: mpsc::UnboundedSender<Result<Rows, E>>) -> Self {
+        Self {
+            buf: BytesMut::new(),
+            stream: stream,
+            kind: kind,
+            tx: tx,
+        }
     }
-    fn extend(&mut self, bytes: Bytes) {
-        self.0.extend_from_slice(&bytes);
+    fn extend_buf(&mut self, bytes: Bytes) {
+        self.buf.extend_from_slice(&bytes);
     }
-    fn split_rows(&mut self, kind: DatasetKind) -> Rows {
-        let buf = &mut self.0;
-        let bytes = match buf.iter()
+    fn split_rows(&mut self) -> Rows {
+        let buf = &mut self.buf;
+        let bytes = match buf
+            .iter()
             .enumerate()
             .rev()
             .find(|(_, &b)| b == b'\n')
         {
             None => buf.split().freeze(),
-            Some((i, _)) => buf.split_to(i).freeze(),
+            Some((i, _)) => buf.split_to(i + 1).freeze(),
         };
-        Rows {
-            inner: bytes,
-            kind: kind,
+        Rows::new(bytes, self.kind)
+    }
+    fn discard_first_row(&mut self) {
+        let buf = &mut self.buf;
+        if let Some((i, _)) = buf
+            .iter()
+            .enumerate()
+            .find(|(_, &b)| b == b'\n')
+        {
+            let _ = buf.split_to(i + 1);
+        }
+    }
+    async fn run(mut self) {
+        if let Some(b) = self.stream.next().await { // discard the header row
+            let b = b.map(|b| {
+                self.extend_buf(b);
+                self.discard_first_row();
+                self.split_rows()
+            });
+            self.tx.send(b).unwrap();
+        }
+        while let Some(b) = self.stream.next().await { // then continue until empty
+            let b = b.map(|b| {
+                self.extend_buf(b);
+                self.split_rows()
+            });
+            self.tx.send(b).unwrap();
         }
     }
 }
