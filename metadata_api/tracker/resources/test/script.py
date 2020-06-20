@@ -11,13 +11,55 @@ files = [
     "title.ratings.tsv.gz",
 ]
 
-counter = 0
+# counter = 0
 
-for file in files:
-	with gzip.open(file, 'rt') as f:
-		reader = csv.reader(f, delimiter='\t', quoting=csv.QUOTE_NONE)
-		print(next(reader))
-		for row in reader:
-			counter += 1
+# for file in files:
+# 	with gzip.open(file, 'rt') as f:
+# 		reader = csv.reader(f, delimiter='\t', quoting=csv.QUOTE_NONE)
+# 		print("---")
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print(next(reader))
+# 		print("---")
 
-print("\n---\nTotal Rows - {}\n---\n".format(counter))
+with gzip.open(files[3], 'rt') as f:
+	reader = csv.reader(f, delimiter='\t', quoting=csv.QUOTE_NONE)
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
+	print(next(reader)[1])
