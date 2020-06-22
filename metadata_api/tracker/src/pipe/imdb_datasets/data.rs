@@ -20,24 +20,24 @@ pub struct Rows {
 #[derive(Debug)]
 pub enum Row<'a> {
     TitlePrincipals { // tconst, ordering, nconst, category, job, characters
-        imdb_id: u32, // n dupes
-        ordering: u32,
-        name_id: u32,
+        imdb_id: i32, // n dupes
+        ordering: i32,
+        name_id: i32,
         category: &'a str,
         job: Option<&'a str>,
         characters: Option<&'a str>,
     },
     NameBasics { // nconst, primaryName, birthYear, deathYear, primaryProfession, knownForTitles
-        name_id: u32,
+        name_id: i32,
         name: &'a str,
-        birth_year: Option<u32>,
-        death_year: Option<u32>,
+        birth_year: Option<i32>,
+        death_year: Option<i32>,
         primary_profession: Option<Vec<&'a str>>,
-        imdb_ids: Option<Vec<u32>>,
+        imdb_ids: Option<Vec<i32>>,
     },
     TitleAkas { // titleId, ordering, title, region, language, types, attributes, isOriginalTitle
-        imdb_id: u32, // ~n/2 dupes
-        ordering: u32,
+        imdb_id: i32, // ~n/2 dupes
+        ordering: i32,
         title: Option<&'a str>,
         region: Option<&'a str>,
         language: Option<&'a str>,
@@ -46,31 +46,31 @@ pub enum Row<'a> {
         is_original_title: Option<bool>,
     },
     TitleBasics { // tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runtimeMinutes, genres
-        imdb_id: u32, // 0 dupes
+        imdb_id: i32, // 0 dupes
         title_type: &'a str,
         primary_title: Option<&'a str>,
         original_title: Option<&'a str>,
         is_adult: bool,
-        start_year: Option<u32>,
-        end_year: Option<u32>,
-        runtime_minutes: Option<u32>,
+        start_year: Option<i32>,
+        end_year: Option<i32>,
+        runtime_minutes: Option<i32>,
         genres: Option<Vec<&'a str>>,
     },
     TitleCrew { // tconst, directors, writers
-        imdb_id: u32, // 0 dupes
-        directors: Option<Vec<u32>>,
-        writers: Option<Vec<u32>>,
+        imdb_id: i32, // 0 dupes
+        directors: Option<Vec<i32>>,
+        writers: Option<Vec<i32>>,
     },
     TitleEpisode { // tconst, parentTconst, seasonNumber, episodeNumber
-        imdb_id: u32, // 0 dupes
-        series_id: u32,
-        season_number: Option<u32>,
-        episode_number: Option<u32>,
+        imdb_id: i32, // 0 dupes
+        series_id: i32,
+        season_number: Option<i32>,
+        episode_number: Option<i32>,
     },
     TitleRatings { // tconst, averageRating, numVotes
-        imdb_id: u32, // 0 dupes
+        imdb_id: i32, // 0 dupes
         average_rating: f32,
-        num_votes: u32,
+        num_votes: i32,
     },
 }
 
@@ -174,7 +174,15 @@ impl Rows {
             kind: kind,
         }
     }
-    fn try_iter<'a>(
+    pub fn try_iter<'a>(&'a self) -> Result<impl Iterator<Item = Result<Row<'a>, Error>>, Error> {
+        use std::convert::TryFrom;
+        Ok(
+            Vec::<Row<'a>>::try_from(self)?
+                .into_iter()
+                .map(|row| Ok(row))
+        )
+    }
+    fn try_str_iter<'a>(
         &'a self
     ) -> Result<impl Iterator<Item = impl Iterator<Item = &'a str>>, std::str::Utf8Error> {
         Ok(
@@ -189,7 +197,7 @@ impl Rows {
 impl<'a> std::convert::TryFrom<&'a Rows> for Vec<Row<'a>> {
     type Error = Error;
     fn try_from(value: &'a Rows) -> Result<Self, Self::Error> {
-        value.try_iter()
+        value.try_str_iter()
             .map_err(|e| Error::Utf8Error {
                 source: e,
                 chunk: value.inner.clone(),
@@ -203,8 +211,10 @@ impl<'a> Row<'a> {
     fn try_from_iter(
         iter: impl Iterator<Item = &'a str>,
         kind: DatasetKind,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Error>
+    {
         let row: Vec<&'a str> = iter.collect();
+        
         let assert_len = |i: usize| -> Result<(), Error> {
             match row.len() {
                 len if len == i => Ok(()),
@@ -224,14 +234,14 @@ impl<'a> Row<'a> {
                 s => Some(s),
             }
         };
-        let map_int = |s: &'a str| -> Result<u32, Error> {
+        let map_int = |s: &'a str| -> Result<i32, Error> {
             s.parse().map_err(|e| Error::StrToIntError {
                 source: e,
                 value: s.to_string(),
                 row: row.iter().map(|s| s.to_string()).collect(),
             })
         };
-        let map_id = |s: &'a str| -> Result<u32, Error> {
+        let map_id = |s: &'a str| -> Result<i32, Error> {
             match s.get(2..) {
                 Some(s) => map_int(s),
                 None => Err(Error::InvalidField {
@@ -259,6 +269,7 @@ impl<'a> Row<'a> {
                 })
             }
         };
+
         match kind {
             DatasetKind::TitlePrincipals => {
                 assert_len(6)?;
