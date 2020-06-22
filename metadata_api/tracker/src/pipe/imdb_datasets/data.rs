@@ -17,6 +17,11 @@ pub struct Rows {
     kind: DatasetKind,
 }
 
+struct RowsIter<T> {
+    inner: T,
+    kind: DatasetKind,
+}
+
 #[derive(Debug)]
 pub enum Row<'a> {
     TitlePrincipals { // tconst, ordering, nconst, category, job, characters
@@ -182,35 +187,27 @@ impl Rows {
         }
     }
     pub fn try_iter<'a>(&'a self) -> Result<impl Iterator<Item = Result<Row<'a>, Error>>, Error> {
-        use std::convert::TryFrom;
-        Ok(
-            Vec::<Row<'a>>::try_from(self)?
-                .into_iter()
-                .map(|row| Ok(row))
-        )
-    }
-    fn try_str_iter<'a>(
-        &'a self
-    ) -> Result<impl Iterator<Item = impl Iterator<Item = &'a str>>, std::str::Utf8Error> {
-        Ok(
-            std::str::from_utf8(&self.inner)?
+        Ok(RowsIter {
+            inner: std::str::from_utf8(&self.inner)
+                .map_err(|e| Error::Utf8Error {
+                    source: e,
+                    chunk: self.inner.clone(),
+                })?
                 .split('\n')
-                .filter(|&str| str != "") // filter out empty rows (is expected!)
-                .map(|row| row.split('\t'))
-        )
+                .filter(|&str| str != "")
+                .map(|row| row.split('\t')),
+            kind: self.kind,
+        })
     }
 }
 
-impl<'a> std::convert::TryFrom<&'a Rows> for Vec<Row<'a>> {
-    type Error = Error;
-    fn try_from(value: &'a Rows) -> Result<Self, Self::Error> {
-        value.try_str_iter()
-            .map_err(|e| Error::Utf8Error {
-                source: e,
-                chunk: value.inner.clone(),
-            })?
-            .map(|row| Row::try_from_iter(row, value.kind))
-            .collect()
+impl<'a, T: Iterator<Item = impl Iterator<Item = &'a str>>> Iterator for RowsIter<T> {
+    type Item = Result<Row<'a>, Error>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.inner.next() {
+            Some(iter) => Some(Row::try_from_iter(iter, self.kind)),
+            None => None,
+        }
     }
 }
 

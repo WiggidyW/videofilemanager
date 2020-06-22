@@ -33,7 +33,7 @@ where
     T: Send + 'static,
 {
     type Error = <P as Pipe<DatasetKind, Bytes>>::Error;
-    type Stream = mpsc::UnboundedReceiver<Result<Rows, Self::Error>>;
+    type Stream = mpsc::Receiver<Result<Rows, Self::Error>>;
     async fn get(&self, _: T) -> Result<Self::Stream, Self::Error> {
         self.tasks.lock().unwrap().clear(); // drops all existing streams
         let streams = future::try_join_all(
@@ -46,7 +46,7 @@ where
                 })
             )
             .await?;
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(100);
         *self.tasks.lock().unwrap() = streams
             .into_iter()
             .map(|(stream, kind)| {
@@ -64,7 +64,7 @@ struct RowTransceiver<S, E> {
     buf: BytesMut,
     stream: S,
     kind: DatasetKind,
-    tx: mpsc::UnboundedSender<Result<Rows, E>>,
+    tx: mpsc::Sender<Result<Rows, E>>,
 }
 
 impl<S, E> RowTransceiver<S, E>
@@ -72,7 +72,7 @@ where
     S: Stream<Item = Result<Bytes, E>> + Unpin,
     E: std::fmt::Debug,
 {
-    fn new(stream: S, kind: DatasetKind, tx: mpsc::UnboundedSender<Result<Rows, E>>) -> Self {
+    fn new(stream: S, kind: DatasetKind, tx: mpsc::Sender<Result<Rows, E>>) -> Self {
         Self {
             buf: BytesMut::new(),
             stream: stream,
@@ -113,14 +113,14 @@ where
                 self.discard_first_row();
                 self.split_rows()
             });
-            self.tx.send(b).unwrap();
+            self.tx.send(b).await.unwrap();
         }
         while let Some(b) = self.stream.next().await { // then continue until empty
             let b = b.map(|b| {
                 self.extend_buf(b);
                 self.split_rows()
             });
-            self.tx.send(b).unwrap();
+            self.tx.send(b).await.unwrap();
         }
     }
 }

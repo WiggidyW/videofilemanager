@@ -14,18 +14,18 @@ mod tests {
     use super::*;
     use std::convert::TryFrom;
 
-    // #[tokio::test(threaded_scheduler)]
-    // async fn test_local_files_correct_row_count() {
-    //     let rows_pipe = rows::RowsPipe::new(source::LocalFilePipe::new("resources/test"));
-    //     let mut stream = rows_pipe.get(()).await.unwrap();
-    //     let mut counter: usize = 0;
-    //     while let Some(rows) = stream.next().await {
-    //         let rows = rows.unwrap();
-    //         let num_rows = Vec::<Row>::try_from(&rows).unwrap().len();
-    //         counter += num_rows;
-    //     }
-    //     assert_eq!(counter, 90_938_739);
-    // }
+    #[tokio::test(threaded_scheduler)]
+    async fn test_local_files_correct_row_count() {
+        let rows_pipe = rows::RowsPipe::new(source::LocalFilePipe::new("resources/test"));
+        let mut stream = rows_pipe.get(()).await.unwrap();
+        let mut counter: usize = 0;
+        while let Some(rows) = stream.next().await {
+            let rows = rows.unwrap();
+            let num_rows = rows.try_iter().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len();
+            counter += num_rows;
+        }
+        assert_eq!(counter, 90_938_739);
+    }
 
     #[tokio::test(threaded_scheduler)]
     async fn test_sqlite_pipe() {

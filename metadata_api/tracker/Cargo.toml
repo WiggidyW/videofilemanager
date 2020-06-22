@@ -21,3 +21,6 @@ bytes = "^0.5"
 tokio = { version = "^0.2", features = ["rt-threaded", "sync", "fs"] }
 async-compression = { version = "^0.3", features = ["gzip", "stream"], default-features = false }
 tokio-util = { version = "^0.3", features = ["codec"] }
+
+[profile.test]
+opt-level = 2

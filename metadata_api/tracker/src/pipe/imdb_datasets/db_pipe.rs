@@ -124,19 +124,19 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
         let transaction = Arc::new(TokioMutex::new( // needed for looping, rust shenanigans
             self.pool.begin().await?
         ));
-        let mut futures_pool = FuturesUnordered::new();
         sqlx::query_file!("resources/imdb_datasets_DOWN.sql") // drops tables (in transaction)
             .execute(&mut *transaction.lock().await)
             .await?;
         sqlx::query_file!("resources/imdb_datasets_UP.sql") // creates tables (in transaction)
             .execute(&mut *transaction.lock().await)
             .await?;
+        let futures_pool = FuturesUnordered::new(); // will store the futures that parse + insert
         let mut stream = self.pipe.get(()).await.map_err(|e| SqliteError::PipeError(e))?;
         while let Some(rows) = stream.next().await {
             let rows = rows.map_err(|e| SqliteError::PipeError(e))?;
             let tx = transaction.clone();
             futures_pool.push(tokio::spawn(async move {
-                for row in rows.try_iter()?
+                for row in rows.try_iter()? // this iterator makes up a lot of our cpu time
                 {
                     let row = row?;
                     insert_row(row) // query
@@ -149,9 +149,11 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                 >::Ok(())
             }));
         }
-        for fut in futures_pool.iter_mut() {
-            fut.await.unwrap()?;
-        }
+        futures_pool.then(|join_handle| async move { join_handle.unwrap() })
+            .collect::<Vec<Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>>>>()
+            .await
+            .into_iter()
+            .collect::<Result<_, SqliteError<<P as Pipe<(), Rows>>::Error>>>()?;
         match Arc::try_unwrap(transaction) {
             Ok(transaction) => transaction.into_inner().commit().await?,
             Err(_) => unreachable!(),
