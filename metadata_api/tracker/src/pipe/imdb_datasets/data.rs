@@ -74,46 +74,53 @@ pub enum Row<'a> {
     },
 }
 
+#[derive(Debug, Default, Clone)]
 pub struct TitleInfo {
-    imdb_id: u32,
-    title_type: Option<String>,
-    primary_title: Option<String>,
-    original_title: Option<String>,
-    is_adult: bool,
-    start_year: Option<u32>,
-    end_year: Option<u32>,
-    runtime_minutes: Option<u32>,
-    genres: Option<Vec<String>>,
-    average_rating: Option<f32>,
-    num_votes: Option<u32>,
-    series_id: Option<u32>,
-    season_number: Option<u32>,
-    episode_number: Option<u32>,
-    episodes: Option<Vec<TitleInfoEpisode>>,
-    titles: Option<Vec<TitleInfoTitle>>,
-    people: Option<Vec<TitleInfoPerson>>,
+    pub imdb_id: i32,
+    pub title_type: Option<String>,
+    pub primary_title: Option<String>,
+    pub original_title: Option<String>,
+    pub is_adult: Option<bool>,
+    pub start_year: Option<i32>,
+    pub end_year: Option<i32>,
+    pub runtime_minutes: Option<i32>,
+    pub genres: Option<Vec<String>>,
+    pub average_rating: Option<f32>,
+    pub num_votes: Option<i32>,
+    pub series_id: Option<i32>,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
+    pub episodes: Option<Vec<TitleInfoEpisode>>,
+    pub titles: Option<Vec<TitleInfoTitle>>,
+    pub people: Option<Vec<TitleInfoPerson>>,
 }
+#[derive(Debug, Default, Clone)]
 pub struct TitleInfoEpisode {
-    imdb_id: u32,
-    season_number: Option<u32>,
-    episode_number: Option<u32>,
+    pub imdb_id: i32,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
 }
+#[derive(Debug, Default, Clone)]
 pub struct TitleInfoTitle {
-    title: String,
-    region: Option<String>,
-    language: Option<String>,
-    types: Option<String>,
-    attributes: Option<String>,
-    is_original_title: Option<bool>,
+    pub title: String,
+    pub ordering: i32,
+    pub region: Option<String>,
+    pub language: Option<String>,
+    pub types: Option<String>,
+    pub attributes: Option<String>,
+    pub is_original_title: Option<bool>,
 }
+#[derive(Debug, Default, Clone)]
 pub struct TitleInfoPerson {
-    name_id: u32,
-    name: Option<String>,
-    category: Option<String>,
-    job: Option<String>,
-    characters: Option<String>,
-    writer: bool,
-    director: bool,
+    pub name_id: i32,
+    pub name: Option<String>,
+    pub birth_year: Option<i32>,
+    pub death_year: Option<i32>,
+    pub categories: Option<Vec<String>>,
+    pub jobs: Option<Vec<String>>,
+    pub characters: Option<Vec<String>>,
+    pub writer: bool,
+    pub director: bool,
 }
 
 #[derive(Debug, Display, Error)]
@@ -125,7 +132,7 @@ pub enum Error {
     },
     #[display(fmt = "The following value was an invalid integer: '{}'\nRow: '{:?}'", value, row)]
     StrToIntError {
-        source: <u32 as std::str::FromStr>::Err,
+        source: <i32 as std::str::FromStr>::Err,
         value: String,
         row: Vec<String>,
     },
