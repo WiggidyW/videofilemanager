@@ -1,3 +1,7 @@
 *.tsv
 *.tsv.gz
 script.py
+*.db
+*wal
+*shm
+datasets
