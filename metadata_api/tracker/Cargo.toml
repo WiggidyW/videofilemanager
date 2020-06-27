@@ -9,7 +9,6 @@ edition = "2018"
 [dependencies]
 serde = "^1.0"
 serde_json = "^1.0"
-mongodb = "^1.0"
 async-trait = "^0.1"
 futures = "^0.3"
 derive_more = "^0.99"
@@ -18,9 +17,10 @@ lazy_static = "^1.4"
 reqwest = { path = "../../../reqwest", default-features = false, features = ["rustls-tls", "stream"] }
 sqlx = { version = "^0.3", features = ["macros", "sqlite"] }
 bytes = "^0.5"
-tokio = { version = "^0.2", features = ["rt-threaded", "sync", "fs"] }
+tokio = { version = "^0.2", features = ["rt-threaded", "sync", "fs", "macros"] }
 async-compression = { version = "^0.3", features = ["gzip", "stream"], default-features = false }
 tokio-util = { version = "^0.3", features = ["codec"] }
+pyo3 = "^0.10"
 
 [profile.test]
 opt-level = 2
