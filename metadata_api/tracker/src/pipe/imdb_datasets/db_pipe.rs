@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use futures::stream::StreamExt;
 use futures::stream::futures_unordered::FuturesUnordered;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 pub struct SqlitePipe<P> {
     pipe: P,
@@ -33,9 +34,9 @@ impl<P: Pipe<(), Rows>> Pipe<ImdbId, TitleInfo> for SqlitePipe<P> {
     type Stream = futures::stream::Iter<std::iter::Once<Result<TitleInfo, Self::Error>>>;
     async fn get(&self, token: ImdbId) -> Result<Self::Stream, Self::Error> {
         let mut title_info = self.get_title_info(token).await?;
-        if {
+        if 
             &title_info.title_type == &None
-        } {
+        {
             self.refresh().await?;
             title_info = self.get_title_info(token).await?;
         }
@@ -53,16 +54,12 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
     }
     pub async fn tables_up(&self) -> Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>> {
         let mut conn = self.pool.acquire().await?;
-        sqlx::query_file!("resources/imdb_datasets_UP.sql")
-            .execute(&mut conn)
-            .await?;
+        sqlx::query_file!("resources/imdb_datasets_UP.sql").execute(&mut conn).await?;
         Ok(())
     }
     pub async fn tables_down(&self) -> Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>> {
         let mut conn = self.pool.acquire().await?;
-        sqlx::query_file!("resources/imdb_datasets_DOWN.sql")
-            .execute(&mut conn)
-            .await?;
+        sqlx::query_file!("resources/imdb_datasets_DOWN.sql").execute(&mut conn).await?;
         Ok(())
     }
     async fn refresh(&self) -> Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>> {
@@ -71,13 +68,13 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                 Row::TitlePrincipals {
                     imdb_id, ordering, name_id, category, job, characters,
                 } => sqlx::query!(
-                    "INSERT INTO title_principals VALUES ( $1, $2, $3, $4, $5, $6, $7 )",
+                    "INSERT INTO title_principals_temp VALUES ( $1, $2, $3, $4, $5, $6, $7 )",
                     Option::<i32>::None, imdb_id, ordering, name_id, category, job, characters,
                 ),
                 Row::NameBasics {
                     name_id, name, birth_year, death_year, primary_profession, imdb_ids,
                 } => sqlx::query!(
-                    "INSERT INTO name_basics VALUES ( $1, $2, $3, $4, $5, $6, $7 )",
+                    "INSERT INTO name_basics_temp VALUES ( $1, $2, $3, $4, $5, $6, $7 )",
                     Option::<i32>::None, name_id, name, birth_year, death_year,
                     primary_profession.map(|s| serde_json::Value::from(s).to_string()),
                     imdb_ids.map(|s| serde_json::Value::from(s).to_string()),
@@ -86,7 +83,7 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                     imdb_id, ordering, title, region, language, types, attributes,
                     is_original_title,
                 } => sqlx::query!(
-                    "INSERT INTO title_akas VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )",
+                    "INSERT INTO title_akas_temp VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9 )",
                     Option::<i32>::None, imdb_id, ordering, title, region, language, types,
                     attributes, is_original_title,
                 ),
@@ -94,7 +91,7 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                     imdb_id, title_type, primary_title, original_title, is_adult, start_year,
                     end_year, runtime_minutes, genres,
                 } => sqlx::query!(
-                    "INSERT INTO title_basics VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 )",
+                    "INSERT INTO title_basics_temp VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, $9, $10 )",
                     Option::<i32>::None, imdb_id, title_type, primary_title, original_title,
                     is_adult, start_year, end_year, runtime_minutes,
                     genres.map(|s| serde_json::Value::from(s).to_string()),
@@ -102,7 +99,7 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                 Row::TitleCrew {
                     imdb_id, directors, writers,
                 } => sqlx::query!(
-                    "INSERT INTO title_crew VALUES ( $1, $2, $3, $4 )",
+                    "INSERT INTO title_crew_temp VALUES ( $1, $2, $3, $4 )",
                     Option::<i32>::None, imdb_id,
                     directors.map(|s| serde_json::Value::from(s).to_string()),
                     writers.map(|s| serde_json::Value::from(s).to_string()),
@@ -110,55 +107,56 @@ impl<P: Pipe<(), Rows>> SqlitePipe<P> {
                 Row::TitleEpisode {
                     imdb_id, series_id, season_number, episode_number,
                 } => sqlx::query!(
-                    "INSERT INTO title_episode VALUES ( $1, $2, $3, $4, $5 )",
+                    "INSERT INTO title_episode_temp VALUES ( $1, $2, $3, $4, $5 )",
                     Option::<i32>::None, imdb_id, series_id, season_number, episode_number,
                 ),
                 Row::TitleRatings {
                     imdb_id, average_rating, num_votes,
                 } => sqlx::query!(
-                    "INSERT INTO title_ratings VALUES ( $1, $2, $3, $4 )",
+                    "INSERT INTO title_ratings_temp VALUES ( $1, $2, $3, $4 )",
                     Option::<i32>::None, imdb_id, average_rating, num_votes,
                 ),
             }
         };
-        let transaction = Arc::new(TokioMutex::new( // needed for looping, rust shenanigans
-            self.pool.begin().await?
-        ));
-        sqlx::query_file!("resources/imdb_datasets_DOWN.sql") // drops tables (in transaction)
-            .execute(&mut *transaction.lock().await)
-            .await?;
-        sqlx::query_file!("resources/imdb_datasets_UP.sql") // creates tables (in transaction)
-            .execute(&mut *transaction.lock().await)
-            .await?;
-        let futures_pool = FuturesUnordered::new(); // will store the futures that parse + insert
+        let mut conn = self.pool.acquire().await?;
+        // create temporary tables as a quasi-"transaction"
+        sqlx::query_file!("resources/imdb_datasets_temp_DOWN.sql").execute(&mut conn).await?;
+        sqlx::query_file!("resources/imdb_datasets_temp_UP.sql").execute(&mut conn).await?;
         let mut stream = self.pipe.get(()).await.map_err(|e| SqliteError::PipeError(e))?;
         while let Some(rows) = stream.next().await {
             let rows = rows.map_err(|e| SqliteError::PipeError(e))?;
-            let tx = transaction.clone();
-            futures_pool.push(tokio::spawn(async move {
-                for row in rows.try_iter()? // this iterator makes up a lot of our cpu time
-                {
-                    let row = row?;
-                    insert_row(row) // query
-                        .execute(&mut *tx.lock().await)
-                        .await?;
-                }
-                Result::<
-                    (),
-                    SqliteError<<P as Pipe<(), Rows>>::Error>,
-                >::Ok(())
-            }));
+            for row in rows.try_iter()? {
+                let row = row?;
+                insert_row(row).execute(&mut conn).await?;
+            }
         }
-        futures_pool.then(|join_handle| async move { join_handle.unwrap() })
-            .collect::<Vec<Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>>>>()
-            .await
-            .into_iter()
-            .collect::<Result<_, SqliteError<<P as Pipe<(), Rows>>::Error>>>()?;
-        match Arc::try_unwrap(transaction) {
-            Ok(transaction) => transaction.into_inner().commit().await?,
-            Err(_) => unreachable!(),
-        };
+        // finally, we replace the old tables with the new tables
+        sqlx::query_file!("resources/imdb_datasets_temp_REPLACE.sql").execute(&mut conn).await?;
         Ok(())
+        // let futures_pool = FuturesUnordered::new(); // will store the futures that parse + insert
+        // let mut stream = self.pipe.get(()).await.map_err(|e| SqliteError::PipeError(e))?;
+        // while let Some(rows) = stream.next().await {
+        //     let rows = rows.map_err(|e| SqliteError::PipeError(e))?;
+        //     for row in rows.try_iter()? {
+        //         let row = row?;
+        //         insert_row(row).execute(&mut conn).await?;
+        //     }
+        //     let pool = self.pool.clone();
+        //     futures_pool.push(tokio::spawn(async move {
+        //         let mut conn = pool.acquire().await?;
+        //         for row in rows.try_iter()? { // this iterator makes up a lot of our cpu time
+        //             let row = row?;
+        //             insert_row(row).execute(&mut conn).await?; // generate the query from closure
+        //         }
+        //         std::mem::drop(rows); // avoid wasted memory
+        //         Result::<(), SqliteError<<P as Pipe<(), Rows>>::Error>>::Ok(()) // explicitly write return type for task
+        //     }));
+        // }
+        // futures_pool.then(|join_handle| async move { join_handle.unwrap() }) // unwrap the possible thread panicks
+        //     .collect::<Vec<Result<(), SqliteError<<P as Pipe<(), Rows>>::Error>>>>() // this future will run each unwrap in the set
+        //     .await
+        //     .into_iter() // turn the vec from the previous await into an iterator
+        //     .collect::<Result<_, SqliteError<<P as Pipe<(), Rows>>::Error>>>()?;
     }
     async fn get_title_info(
         &self,

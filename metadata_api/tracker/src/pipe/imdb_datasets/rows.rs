@@ -1,126 +1,122 @@
-use crate::pipe::Pipe;
-use super::{DatasetKind, Rows};
-use bytes::{Bytes, BytesMut};
-use async_trait::async_trait;
-use tokio::task::JoinHandle;
-use tokio::sync::mpsc;
-use futures::stream::{Stream, StreamExt};
-use futures::future;
-use std::sync::Mutex;
+use crate::pipe::imdb_datasets::ByteRowError;
+use std::sync::Arc;
+use derive_more::{Display, Error};
 
-pub struct RowsPipe<P> {
-    inner: P,
-    tasks: Mutex<Vec<JoinHandle<()>>>,
+#[derive(Debug, Clone)]
+pub struct ByteRowPipe<P> {
+    chunk_pipe: Arc<P>,
 }
 
-impl<P> RowsPipe<P>
-where
-    P: Pipe<DatasetKind, Bytes> + 'static,
-    <P as Pipe<DatasetKind, Bytes>>::Stream: Send,
-{
-    pub fn new(pipe: P) -> Self {
-        Self {
-            inner: pipe,
-            tasks: Mutex::new(Vec::with_capacity(7)),
+#[derive(Debug, Display, Error)]
+pub enum ByteRowPipeError<E> {
+    ChunkPipeError(E),
+    ByteRowError(ByteRowError),
+}
+
+mod rows_pipe {
+    use super::{ByteRowPipe, ByteRowPipeError};
+    use crate::pipe::imdb_datasets::{DatasetKind, Chunk, ByteRow, ByteRowError};
+    use crate::pipe::Pipe;
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use bytes::{Bytes, BytesMut};
+    use futures::stream::Stream;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+    use std::collections::VecDeque;
+
+    impl<P: Pipe<DatasetKind, Chunk>> ByteRowPipe<P> {
+        pub fn new(p: Arc<P>) -> Self {
+            Self { chunk_pipe: p }
         }
     }
-}
 
-#[async_trait]
-impl<P, T> Pipe<T, Rows> for RowsPipe<P>
-where
-    P: Pipe<DatasetKind, Bytes> + 'static,
-    T: Send + 'static,
-{
-    type Error = <P as Pipe<DatasetKind, Bytes>>::Error;
-    type Stream = mpsc::Receiver<Result<Rows, Self::Error>>;
-    async fn get(&self, _: T) -> Result<Self::Stream, Self::Error> {
-        self.tasks.lock().unwrap().clear(); // drops all existing streams
-        let streams = future::try_join_all(
-            DatasetKind::iter()
-                .map(|kind| async move {
-                    match self.inner.get(kind).await {
-                        Ok(stream) => Ok((stream, kind)),
-                        Err(e) => Err(e),
-                    }
-                })
-            )
-            .await?;
-        let (tx, rx) = mpsc::channel(100);
-        *self.tasks.lock().unwrap() = streams
-            .into_iter()
-            .map(|(stream, kind)| {
-                let tx = tx.clone();
-                tokio::spawn(async move {
-                    RowTransceiver::new(stream, kind, tx).run().await;
-                })
+    #[async_trait]
+    impl<P: Pipe<DatasetKind, Chunk>> Pipe<DatasetKind, ByteRow> for ByteRowPipe<P> {
+        type Error = ByteRowPipeError<P::Error>;
+        type Stream = impl Stream<Item = Result<ByteRow, Self::Error>> + Send + Unpin;
+        async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+            Ok(ByteRowStream {
+                stream: self.chunk_pipe.get(token)
+                    .await
+                    .map_err(|e| ByteRowPipeError::ChunkPipeError(e))?,
+                buf: Bytes::new(),
+                rows: VecDeque::new(),
+                kind: token,
             })
-            .collect();
-        Ok(rx)
+        }
     }
-}
 
-struct RowTransceiver<S, E> {
-    buf: BytesMut,
-    stream: S,
-    kind: DatasetKind,
-    tx: mpsc::Sender<Result<Rows, E>>,
-}
+    struct ByteRowStream<S> {
+        stream: S,
+        buf: Bytes,
+        rows: VecDeque<Bytes>,
+        kind: DatasetKind,
+    }
 
-impl<S, E> RowTransceiver<S, E>
-where
-    S: Stream<Item = Result<Bytes, E>> + Unpin,
-    E: std::fmt::Debug,
-{
-    fn new(stream: S, kind: DatasetKind, tx: mpsc::Sender<Result<Rows, E>>) -> Self {
-        Self {
-            buf: BytesMut::new(),
-            stream: stream,
-            kind: kind,
-            tx: tx,
+    const SPLIT: u8 = b'\n';
+
+    impl<S> ByteRowStream<S> {
+        fn push(&mut self, chunk: Bytes) {
+            let mut indexes = chunk
+                .iter()
+                .enumerate()
+                .filter_map(|(i, b)| match b == &SPLIT {
+                    true => Some(i),
+                    false => None
+                })
+                .collect::<Vec<usize>>()
+                .into_iter()
+                .peekable();
+            match indexes.peek() {
+                Some(0) if self.buf.is_empty() => (),
+                Some(0) => self.rows.push_front(self.buf.split_off(0)),
+                Some(i) if self.buf.is_empty() => self.rows.push_back(chunk.slice(0..*i)),
+                Some(i) => {
+                    let mut row = BytesMut::new();
+                    row.extend_from_slice(&self.buf.split_off(0));
+                    row.extend_from_slice(&chunk.slice(0..*i));
+                    self.rows.push_back(row.freeze());
+                },
+                None if self.buf.is_empty() => self.buf = chunk,
+                None => {
+                    let mut buf = BytesMut::new();
+                    buf.extend_from_slice(&self.buf.split_off(0));
+                    buf.extend_from_slice(&chunk);
+                    self.buf = buf.freeze();
+                },
+            }
+            for index in indexes {
+                match indexes.peek() {
+                    Some(i) => self.rows.push_back(chunk.slice(index + 1..*i)),
+                    None if index == chunk.len() - 1 => self.rows.push_back(
+                        chunk.slice(index + 1..chunk.len())
+                    ),
+                    None => self.buf = chunk.slice(index + 1..chunk.len()),
+                }
+            }
+        }
+        fn next(&mut self) -> Option<Result<ByteRow, ByteRowError>> {
+            self.rows
+                .pop_front()
+                .map(|b| ByteRow::new(b, self.kind))
         }
     }
-    fn extend_buf(&mut self, bytes: Bytes) {
-        self.buf.extend_from_slice(&bytes);
-    }
-    fn split_rows(&mut self) -> Rows {
-        let buf = &mut self.buf;
-        let bytes = match buf
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, &b)| b == b'\n')
-        {
-            None => buf.split().freeze(),
-            Some((i, _)) => buf.split_to(i + 1).freeze(),
-        };
-        Rows::new(bytes, self.kind)
-    }
-    fn discard_first_row(&mut self) {
-        let buf = &mut self.buf;
-        if let Some((i, _)) = buf
-            .iter()
-            .enumerate()
-            .find(|(_, &b)| b == b'\n')
-        {
-            let _ = buf.split_to(i + 1);
-        }
-    }
-    async fn run(mut self) {
-        if let Some(b) = self.stream.next().await { // discard the header row
-            let b = b.map(|b| {
-                self.extend_buf(b);
-                self.discard_first_row();
-                self.split_rows()
-            });
-            self.tx.send(b).await.unwrap();
-        }
-        while let Some(b) = self.stream.next().await { // then continue until empty
-            let b = b.map(|b| {
-                self.extend_buf(b);
-                self.split_rows()
-            });
-            self.tx.send(b).await.unwrap();
+
+    impl<E, S: Stream<Item = Result<Chunk, E>> + Unpin> Stream for ByteRowStream<S> {
+        type Item = Result<ByteRow, ByteRowPipeError<E>>;
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            if let Some(row) = self.next() {
+                return Poll::Ready(Some(row.map_err(|e| ByteRowPipeError::ByteRowError(e))));
+            }
+            match futures::ready!(Pin::new(&mut self.stream).poll_next(cx)) {
+                Some(Ok(chunk)) => {
+                    self.push(chunk.bytes);
+                    self.poll_next(cx)
+                },
+                None => Poll::Ready(None),
+                Some(Err(e)) => Poll::Ready(Some(Err(ByteRowPipeError::ChunkPipeError(e)))),
+            }
         }
     }
 }
