@@ -1,21 +1,19 @@
-use crate::pipe::imdb_datasets::ByteRowError;
 use std::sync::Arc;
 use derive_more::{Display, Error};
 
 #[derive(Debug, Clone)]
-pub struct ByteRowPipe<P> {
+pub struct ChunkRowPipe<P> {
     chunk_pipe: Arc<P>,
 }
 
 #[derive(Debug, Display, Error)]
-pub enum ByteRowPipeError<E> {
+pub enum ChunkRowPipeError<E> {
     ChunkPipeError(E),
-    ByteRowError(ByteRowError),
 }
 
-mod rows_pipe {
-    use super::{ByteRowPipe, ByteRowPipeError};
-    use crate::pipe::imdb_datasets::{DatasetKind, Chunk, ByteRow, ByteRowError};
+mod chunk_row_pipe {
+    use super::{ChunkRowPipe, ChunkRowPipeError};
+    use crate::pipe::imdb_datasets::{DatasetKind, Chunk, ChunkRow, ChunkExtra};
     use crate::pipe::Pipe;
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -25,97 +23,63 @@ mod rows_pipe {
     use std::task::{Context, Poll};
     use std::collections::VecDeque;
 
-    impl<P: Pipe<DatasetKind, Chunk>> ByteRowPipe<P> {
+    struct ChunkRowStream<S> {
+        stream: S,
+        prev: ChunkExtra,
+        rows: std::vec::IntoIter<ChunkRow>,
+    }
+
+    impl<P: Pipe<DatasetKind, Chunk>> ChunkRowPipe<P> {
         pub fn new(p: Arc<P>) -> Self {
             Self { chunk_pipe: p }
         }
     }
 
     #[async_trait]
-    impl<P: Pipe<DatasetKind, Chunk>> Pipe<DatasetKind, ByteRow> for ByteRowPipe<P> {
-        type Error = ByteRowPipeError<P::Error>;
-        type Stream = impl Stream<Item = Result<ByteRow, Self::Error>> + Send + Unpin;
+    impl<P: Pipe<DatasetKind, Chunk>> Pipe<DatasetKind, ChunkRow> for ChunkRowPipe<P> {
+        type Error = ChunkRowPipeError<P::Error>;
+        type Stream = impl Stream<Item = Result<ChunkRow, Self::Error>> + Send + Unpin;
         async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
-            Ok(ByteRowStream {
-                stream: self.chunk_pipe.get(token)
+            Ok(ChunkRowStream::new(
+                self.chunk_pipe
+                    .get(token)
                     .await
-                    .map_err(|e| ByteRowPipeError::ChunkPipeError(e))?,
-                buf: Bytes::new(),
-                rows: VecDeque::new(),
-                kind: token,
-            })
+                    .map_err(|e| ChunkRowPipeError::ChunkPipeError(e))?
+            ))
         }
     }
 
-    struct ByteRowStream<S> {
-        stream: S,
-        buf: Bytes,
-        rows: VecDeque<Bytes>,
-        kind: DatasetKind,
-    }
-
-    const SPLIT: u8 = b'\n';
-
-    impl<S> ByteRowStream<S> {
-        fn push(&mut self, chunk: Bytes) {
-            let mut indexes = chunk
-                .iter()
-                .enumerate()
-                .filter_map(|(i, b)| match b == &SPLIT {
-                    true => Some(i),
-                    false => None
-                })
-                .collect::<Vec<usize>>()
-                .into_iter()
-                .peekable();
-            match indexes.peek() {
-                Some(0) if self.buf.is_empty() => (),
-                Some(0) => self.rows.push_front(self.buf.split_off(0)),
-                Some(i) if self.buf.is_empty() => self.rows.push_back(chunk.slice(0..*i)),
-                Some(i) => {
-                    let mut row = BytesMut::new();
-                    row.extend_from_slice(&self.buf.split_off(0));
-                    row.extend_from_slice(&chunk.slice(0..*i));
-                    self.rows.push_back(row.freeze());
-                },
-                None if self.buf.is_empty() => self.buf = chunk,
-                None => {
-                    let mut buf = BytesMut::new();
-                    buf.extend_from_slice(&self.buf.split_off(0));
-                    buf.extend_from_slice(&chunk);
-                    self.buf = buf.freeze();
-                },
-            }
-            for index in indexes {
-                match indexes.peek() {
-                    Some(i) => self.rows.push_back(chunk.slice(index + 1..*i)),
-                    None if index == chunk.len() - 1 => self.rows.push_back(
-                        chunk.slice(index + 1..chunk.len())
-                    ),
-                    None => self.buf = chunk.slice(index + 1..chunk.len()),
-                }
+    impl<E, S: Stream<Item = Result<Chunk, E>> + Unpin> ChunkRowStream<S> {
+        fn new(stream: S) -> Self {
+            Self {
+                stream: stream,
+                prev: ChunkExtra::default(),
+                rows: Vec::new().into_iter(),
             }
         }
-        fn next(&mut self) -> Option<Result<ByteRow, ByteRowError>> {
-            self.rows
-                .pop_front()
-                .map(|b| ByteRow::new(b, self.kind))
+        fn refresh(&mut self, chunk: Chunk) {
+            self.rows = chunk
+                .into_chunk_rows(&mut self.prev)
+                .into_iter();
+        }
+        fn next(&mut self) -> Option<ChunkRow> {
+            self.rows.next()
         }
     }
 
-    impl<E, S: Stream<Item = Result<Chunk, E>> + Unpin> Stream for ByteRowStream<S> {
-        type Item = Result<ByteRow, ByteRowPipeError<E>>;
+    impl<E, S: Stream<Item = Result<Chunk, E>> + Unpin> Stream for ChunkRowStream<S> {
+        type Item = Result<ChunkRow, ChunkRowPipeError<E>>;
         fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
             if let Some(row) = self.next() {
-                return Poll::Ready(Some(row.map_err(|e| ByteRowPipeError::ByteRowError(e))));
+                return Poll::Ready(Some(Ok(row)));
             }
             match futures::ready!(Pin::new(&mut self.stream).poll_next(cx)) {
                 Some(Ok(chunk)) => {
-                    self.push(chunk.bytes);
+                    self.refresh(chunk);
                     self.poll_next(cx)
                 },
                 None => Poll::Ready(None),
-                Some(Err(e)) => Poll::Ready(Some(Err(ByteRowPipeError::ChunkPipeError(e)))),
+                Some(Err(e)) => Poll::Ready(Some(Err(ChunkRowPipeError::ChunkPipeError(e)))),
             }
         }
     }

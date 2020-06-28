@@ -9,26 +9,33 @@ pub mod rows;
 pub use data::*;
 pub use Error as DataError;
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::pipe::Pipe;
-//     use futures::stream::StreamExt;
-//     use super::*;
-//     use std::convert::TryFrom;
+#[cfg(test)]
+mod tests {
+    use crate::pipe::Pipe;
+    use futures::stream::StreamExt;
+    use super::*;
+    use std::convert::TryFrom;
+    use std::sync::Arc;
+    use std::collections::HashMap;
 
-//     #[tokio::test(threaded_scheduler)]
-//     async fn test_local_files_correct_row_count() {
-//         let rows_pipe = rows::RowsPipe::new(source::LocalFilePipe::new("resources/test"));
-//         let mut stream = rows_pipe.get(()).await.unwrap();
-//         let mut counter: usize = 0;
-//         while let Some(rows) = stream.next().await {
-//             let rows = rows.unwrap();
-//             let num_rows = rows.try_iter().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len();
-//             counter += num_rows;
-//         }
-//         assert_eq!(counter, 90_938_739);
-//     }
-
+    #[tokio::test(threaded_scheduler)]
+    async fn test_local_files_correct_row_count() {
+        let rows_pipe = Arc::new(rows::ChunkRowPipe::new(Arc::new(chunk::LocalFilePipe::new(
+            {
+                let mut file_map = HashMap::new();
+            }
+        ))));
+        let rows_pipe = rows::RowsPipe::new(source::LocalFilePipe::new("resources/test"));
+        let mut stream = rows_pipe.get(()).await.unwrap();
+        let mut counter: usize = 0;
+        while let Some(rows) = stream.next().await {
+            let rows = rows.unwrap();
+            let num_rows = rows.try_iter().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len();
+            counter += num_rows;
+        }
+        assert_eq!(counter, 90_938_739);
+    }
+}
 //     #[tokio::test(threaded_scheduler)]
 //     async fn test_sqlite_pipe() {
 //         let sqlite_pipe = db_pipe::SqlitePipe::new(

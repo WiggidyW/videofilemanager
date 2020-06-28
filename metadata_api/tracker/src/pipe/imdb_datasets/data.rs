@@ -18,71 +18,111 @@ pub struct Chunk {
     pub kind: DatasetKind,
 }
 
-impl Chunk {
-    pub fn into_chunk_rows(self, extra_col: Vec<Bytes>, mut extra_bytes: Bytes) -> IntoChunkRows {
-        let mut index: usize = 0;
-        let mut count: usize = extra_col.len() + 1;
-        let mut extra_b = Bytes::new();
-        let mut iter = self.bytes
-            .iter()
-            .enumerate()
-            .filter_map(|(i, b)| match (i, b) {
-                (_, b'\t') | (_, b'\n') => match index {
-                    0 => {
-                        index = i;
-                        let mut b = self.bytes.slice(0..i);
-                        if !extra_bytes.is_empty() {
-                            let mut x = BytesMut::with_capacity(extra_bytes.len() + b.len());
-                            x.extend_from_slice(&extra_bytes);
-                            x.extend_from_slice(&b);
-                            b = x.freeze();
-                        }
-                        extra_bytes = b;
-                        None
-                    }
-                    idx => {
-                        index = i;
-                        count += 1;
-                        Some(self.bytes.slice(idx + 1..i))
-                    },
-                },
-                (i, _) if i + 1 == self.bytes.len() => match index {
-                    0 => {
-                        extra_b = self.bytes;
-                        if !extra_bytes.is_empty() {
-                            let mut x = BytesMut::with_capacity(extra_bytes.len() + extra_b.len());
-                            x.extend_from_slice(&extra_bytes);
-                            x.extend_from_slice(&extra_b);
-                            extra_b = x.freeze();
-                        }
-                        return IntoChunkrows {
-                            chunk_rows: Vec::new(),
-                            extra_col: extra_col,
-                            extra_bytes: extra_b,
-                        };
-                    },
-                    _ => {
-                        extra_b = self.bytes.slice(i + 1..self.bytes.len());
-                        None
-                    }
-                },
-                _ => None,
-            });
-        loop {
-
-        }
-    }
-}
-
-pub struct IntoChunkRows {
-    pub chunk_rows: Vec<ChunkRow>,
-    pub extra_col: Vec<Bytes>,
-    pub extra_bytes: Bytes,
+#[derive(Debug, Default)]
+pub struct ChunkExtra {
+    pub columns: Vec<Bytes>,
+    pub part_column: Bytes,
+    pub expected_len: usize,
 }
 
 pub struct ChunkRow {
     pub bytes: Vec<Bytes>,
     pub kind: DatasetKind,
+}
+
+impl DatasetKind {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        vec![
+            DatasetKind::TitlePrincipals,
+            DatasetKind::NameBasics,
+            DatasetKind::TitleAkas,
+            DatasetKind::TitleBasics,
+            DatasetKind::TitleCrew,
+            DatasetKind::TitleEpisode,
+            DatasetKind::TitleRatings,
+        ].into_iter()
+    }
+    pub fn count(&self) -> usize {
+        match self {
+            DatasetKind::TitlePrincipals => 6,
+            DatasetKind::NameBasics => 6,
+            DatasetKind::TitleAkas => 8,
+            DatasetKind::TitleBasics => 9,
+            DatasetKind::TitleCrew => 3,
+            DatasetKind::TitleEpisode => 4,
+            DatasetKind::TitleRatings => 3,
+        }
+    }
+}
+
+impl Chunk {
+    pub fn into_chunk_rows(self, extra: &mut ChunkExtra) -> Vec<ChunkRow> {
+        if self.bytes.is_empty() {
+            return Vec::new(); // short circuit if self contains nothing
+        }
+        let mut iter = self.bytes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| match (i, b) {
+                (i, b'\t') | (i, b'\n') => Some(i),
+                (i, _) if i + 1 == self.bytes.len() => Some(i),
+                _ => None,
+            });
+        if let Some(i) = iter.next() { // always true
+            extra.part_column = match extra.part_column.is_empty() {
+                true => self.bytes.slice(0..i),
+                false => {
+                    let mut b = BytesMut::with_capacity(extra.part_column.len() + i);
+                    b.extend_from_slice(&extra.part_column);
+                    b.extend_from_slice(&self.bytes.slice(0..i));
+                    b.freeze()
+                },
+            };
+            if i + 1 == self.bytes.len() { // in this case, iterator has only 1 value
+                return Vec::new();
+            }
+        }
+        let mut index: usize = 0;
+        let mut new_part_column = Bytes::new();
+        let mut chunk_rows: Vec<ChunkRow> = Vec::with_capacity(extra.expected_len);
+        let mut iter = std::iter::once(extra.part_column.clone())
+            .filter(|b| !b.is_empty())
+            .chain(extra.columns.clone().into_iter())
+            .chain(iter
+                .filter_map(|i| match (i, index) {
+                    (i, idx) if i + 1 == self.bytes.len() && match (&self.bytes)[i] {
+                        b'\t' | b'\n' => false,
+                        _ => true,
+                    } => {
+                        new_part_column = self.bytes.slice(idx + 1..i + 1);
+                        None
+                    },
+                    (i, idx) => {
+                        index = i;
+                        Some(self.bytes.slice(idx + 1..i))
+                    },
+                })
+            );
+        loop {
+            let row: Vec<Bytes> = iter
+                .by_ref()
+                .take(self.kind.count())
+                .collect();
+            match row.len() == self.kind.count() {
+                true => chunk_rows.push(ChunkRow {
+                    bytes: row,
+                    kind: self.kind,
+                }),
+                false => {
+                    extra.columns = row;
+                    break;
+                },
+            }
+        }
+        extra.part_column = new_part_column;
+        extra.expected_len = std::cmp::max(extra.expected_len, chunk_rows.len());
+        chunk_rows
+    }
 }
 
 // pub struct CElement {
@@ -138,62 +178,62 @@ pub struct ChunkRow {
 //     pub fn into_byte_rows(self) -> (Bytes, Bytes, Bytes)
 // }
 
-#[derive(Debug, Display, Error)]
-#[display(fmt =
-    "Error converting Bytes to ByteRow.\n\tBytes: {:?}\n\tKind: {:?}\n\tExpected Length: {}",
-    row, kind, expected_len,
-)]
-pub struct ByteRowError {
-    row: Vec<Bytes>,
-    kind: DatasetKind,
-    expected_len: usize,
-}
+// #[derive(Debug, Display, Error)]
+// #[display(fmt =
+//     "Error converting Bytes to ByteRow.\n\tBytes: {:?}\n\tKind: {:?}\n\tExpected Length: {}",
+//     row, kind, expected_len,
+// )]
+// pub struct ByteRowError {
+//     row: Vec<Bytes>,
+//     kind: DatasetKind,
+//     expected_len: usize,
+// }
 
-const SPLIT: u8 = b'\t';
+// const SPLIT: u8 = b'\t';
 
-impl ByteRow {
-    pub fn new(bytes: Bytes, kind: DatasetKind) -> Result<Self, ByteRowError> {
-        let row: Vec<Bytes> = Vec::with_capacity(Self::expected_len(kind));
-        let indexes = bytes.iter()
-            .enumerate()
-            .filter_map(|(i, b)| match b == &SPLIT {
-                true => Some(i),
-                false => None,
-            })
-            .peekable();
-        if let Some(i) = indexes.peek() {
-            row.push(bytes.slice(0..*i));
-        }
-        for index in indexes {
-            match indexes.peek() {
-                Some(i) => row.push(bytes.slice(index + 1..*i)),
-                None => row.push(bytes.slice(index + 1..bytes.len())),
-            };
-        }
-        match row.len() == Self::expected_len(kind) {
-            true => Ok(Self {
-                bytes: row,
-                kind: kind,
-            }),
-            false => Err(ByteRowError {
-                row: row,
-                kind: kind,
-                expected_len: Self::expected_len(kind),
-            })
-        }
-    }
-    fn expected_len(kind: DatasetKind) -> usize {
-        match kind {
-            DatasetKind::TitlePrincipals => 6,
-            DatasetKind::NameBasics => 6,
-            DatasetKind::TitleAkas => 8,
-            DatasetKind::TitleBasics => 9,
-            DatasetKind::TitleCrew => 3,
-            DatasetKind::TitleEpisode => 4,
-            DatasetKind::TitleRatings => 3,
-        }
-    }
-}
+// impl ByteRow {
+//     pub fn new(bytes: Bytes, kind: DatasetKind) -> Result<Self, ByteRowError> {
+//         let row: Vec<Bytes> = Vec::with_capacity(Self::expected_len(kind));
+//         let indexes = bytes.iter()
+//             .enumerate()
+//             .filter_map(|(i, b)| match b == &SPLIT {
+//                 true => Some(i),
+//                 false => None,
+//             })
+//             .peekable();
+//         if let Some(i) = indexes.peek() {
+//             row.push(bytes.slice(0..*i));
+//         }
+//         for index in indexes {
+//             match indexes.peek() {
+//                 Some(i) => row.push(bytes.slice(index + 1..*i)),
+//                 None => row.push(bytes.slice(index + 1..bytes.len())),
+//             };
+//         }
+//         match row.len() == Self::expected_len(kind) {
+//             true => Ok(Self {
+//                 bytes: row,
+//                 kind: kind,
+//             }),
+//             false => Err(ByteRowError {
+//                 row: row,
+//                 kind: kind,
+//                 expected_len: Self::expected_len(kind),
+//             })
+//         }
+//     }
+//     fn expected_len(kind: DatasetKind) -> usize {
+//         match kind {
+//             DatasetKind::TitlePrincipals => 6,
+//             DatasetKind::NameBasics => 6,
+//             DatasetKind::TitleAkas => 8,
+//             DatasetKind::TitleBasics => 9,
+//             DatasetKind::TitleCrew => 3,
+//             DatasetKind::TitleEpisode => 4,
+//             DatasetKind::TitleRatings => 3,
+//         }
+//     }
+// }
 
 // #[derive(Debug)]
 // pub enum Row<'a> {
@@ -336,31 +376,6 @@ pub enum Error {
         expected: usize,
         found: usize,
     },
-}
-
-impl DatasetKind {
-    pub fn iter() -> impl Iterator<Item = Self> {
-        vec![
-            DatasetKind::TitlePrincipals,
-            DatasetKind::NameBasics,
-            DatasetKind::TitleAkas,
-            DatasetKind::TitleBasics,
-            DatasetKind::TitleCrew,
-            DatasetKind::TitleEpisode,
-            DatasetKind::TitleRatings,
-        ].into_iter()
-    }
-    pub fn count(&self) -> usize {
-        match self {
-            DatasetKind::TitlePrincipals => 6,
-            DatasetKind::NameBasics => 6,
-            DatasetKind::TitleAkas => 8,
-            DatasetKind::TitleBasics => 9,
-            DatasetKind::TitleCrew => 3,
-            DatasetKind::TitleEpisode => 4,
-            DatasetKind::TitleRatings => 3,
-        }
-    }
 }
 
 // impl From<(Bytes, DatasetKind)> for Chunk {

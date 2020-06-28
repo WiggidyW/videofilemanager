@@ -99,6 +99,13 @@ mod local_file_pipe {
     use async_trait::async_trait;
     use std::path::Path;
     use std::sync::Arc;
+    use std::collections::HashMap;
+
+    impl<P: AsRef<Path> + Send + Sync> LocalFilePipe<P> {
+        pub fn new(file_map: HashMap<DatasetKind, P>) -> Self {
+            Self { file_map: file_map }
+        }
+    }
 
     #[async_trait]
     impl<P: AsRef<Path> + Send + Sync> Pipe<DatasetKind, Chunk> for LocalFilePipe<P> {
