@@ -1,5 +1,5 @@
 use derive_more::{Error, Display, From};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DatasetKind {
@@ -18,11 +18,125 @@ pub struct Chunk {
     pub kind: DatasetKind,
 }
 
-#[derive(Debug, From)]
-pub struct ByteRow {
-    bytes: Vec<Bytes>,
-    kind: DatasetKind,
+impl Chunk {
+    pub fn into_chunk_rows(self, extra_col: Vec<Bytes>, mut extra_bytes: Bytes) -> IntoChunkRows {
+        let mut index: usize = 0;
+        let mut count: usize = extra_col.len() + 1;
+        let mut extra_b = Bytes::new();
+        let mut iter = self.bytes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, b)| match (i, b) {
+                (_, b'\t') | (_, b'\n') => match index {
+                    0 => {
+                        index = i;
+                        let mut b = self.bytes.slice(0..i);
+                        if !extra_bytes.is_empty() {
+                            let mut x = BytesMut::with_capacity(extra_bytes.len() + b.len());
+                            x.extend_from_slice(&extra_bytes);
+                            x.extend_from_slice(&b);
+                            b = x.freeze();
+                        }
+                        extra_bytes = b;
+                        None
+                    }
+                    idx => {
+                        index = i;
+                        count += 1;
+                        Some(self.bytes.slice(idx + 1..i))
+                    },
+                },
+                (i, _) if i + 1 == self.bytes.len() => match index {
+                    0 => {
+                        extra_b = self.bytes;
+                        if !extra_bytes.is_empty() {
+                            let mut x = BytesMut::with_capacity(extra_bytes.len() + extra_b.len());
+                            x.extend_from_slice(&extra_bytes);
+                            x.extend_from_slice(&extra_b);
+                            extra_b = x.freeze();
+                        }
+                        return IntoChunkrows {
+                            chunk_rows: Vec::new(),
+                            extra_col: extra_col,
+                            extra_bytes: extra_b,
+                        };
+                    },
+                    _ => {
+                        extra_b = self.bytes.slice(i + 1..self.bytes.len());
+                        None
+                    }
+                },
+                _ => None,
+            });
+        loop {
+
+        }
+    }
 }
+
+pub struct IntoChunkRows {
+    pub chunk_rows: Vec<ChunkRow>,
+    pub extra_col: Vec<Bytes>,
+    pub extra_bytes: Bytes,
+}
+
+pub struct ChunkRow {
+    pub bytes: Vec<Bytes>,
+    pub kind: DatasetKind,
+}
+
+// pub struct CElement {
+//     pub 
+// }
+
+// pub struct CRow {
+//     elements: Vec<CElement>,
+// }
+
+// pub struct CElement {
+// }
+
+// pub struct IntoByteRows {
+
+//     pub prejunct: Bytes,
+//     pub rows: ,
+//     pub postjunct: Bytes,
+// }
+
+// impl From<Chunk> for IntoByteRows {
+//     fn from(value: Chunk) -> Self {
+//         let mut rows: Vec<Vec<>>
+//         let mut index: usize = 0;
+
+//     }
+// }
+
+// #[derive(Debug, From)]
+// pub struct ByteRow {
+//     pub bytes: Vec<Bytes>,
+//     pub kind: DatasetKind,
+// }
+
+// impl ByteRow {
+//     fn new(kind: DatasetKind) -> Self {
+//         Self {
+//             bytes: Vec::with_capacity(match kind {
+//                 DatasetKind::TitlePrincipals => 6,
+//                 DatasetKind::NameBasics => 6,
+//                 DatasetKind::TitleAkas => 8,
+//                 DatasetKind::TitleBasics => 9,
+//                 DatasetKind::TitleCrew => 3,
+//                 DatasetKind::TitleEpisode => 4,
+//                 DatasetKind::TitleRatings => 3,
+//             }),
+//             kind: kind,
+//         }
+//     }
+// }
+
+// impl Chunk {
+//     pub fn into_byte_rows(self) -> (Bytes, Bytes, Bytes)
+// }
 
 #[derive(Debug, Display, Error)]
 #[display(fmt =
@@ -235,6 +349,17 @@ impl DatasetKind {
             DatasetKind::TitleEpisode,
             DatasetKind::TitleRatings,
         ].into_iter()
+    }
+    pub fn count(&self) -> usize {
+        match self {
+            DatasetKind::TitlePrincipals => 6,
+            DatasetKind::NameBasics => 6,
+            DatasetKind::TitleAkas => 8,
+            DatasetKind::TitleBasics => 9,
+            DatasetKind::TitleCrew => 3,
+            DatasetKind::TitleEpisode => 4,
+            DatasetKind::TitleRatings => 3,
+        }
     }
 }
 
