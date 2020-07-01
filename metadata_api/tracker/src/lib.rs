@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![feature(type_alias_impl_trait)]
 
-pub mod pipe;
+pub mod pipes;
 pub mod tokens;
 
 use async_trait::async_trait;

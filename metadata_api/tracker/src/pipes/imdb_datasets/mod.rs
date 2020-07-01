@@ -2,8 +2,8 @@ mod data;
 pub use data::*;
 
 pub mod db_pipe;
-pub mod chunk;
-pub mod rows;
+pub mod chunk_pipe;
+pub mod chunk_row_pipe;
 
 #[cfg(test)]
 mod tests {
