@@ -18,16 +18,89 @@ pub struct Chunk {
     pub kind: DatasetKind,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ChunkExtra {
     pub columns: Vec<Bytes>,
-    pub part_column: Bytes,
+    pub part_column: Option<Bytes>,
     pub expected_len: usize,
 }
 
+#[derive(Debug)]
+// This will always have the correct number of rows!
 pub struct ChunkRow {
     pub bytes: Vec<Bytes>,
     pub kind: DatasetKind,
+}
+
+#[derive(Debug)]
+pub enum Row<'a> {
+    TitlePrincipals { // tconst, ordering, nconst, category, job, characters
+        imdb_id: u32, // n dupes
+        ordering: u32,
+        name_id: u32,
+        category: &'a str,
+        job: Option<&'a str>,
+        characters: Option<&'a str>,
+    },
+    NameBasics { // nconst, primaryName, birthYear, deathYear, primaryProfession, knownForTitles
+        name_id: u32,
+        name: &'a str,
+        birth_year: Option<u32>,
+        death_year: Option<u32>,
+        primary_profession: Option<Vec<&'a str>>,
+        imdb_ids: Option<Vec<u32>>,
+    },
+    TitleAkas { // titleId, ordering, title, region, language, types, attributes, isOriginalTitle
+        imdb_id: u32, // ~n/2 dupes
+        ordering: u32,
+        title: Option<&'a str>,
+        region: Option<&'a str>,
+        language: Option<&'a str>,
+        types: Option<&'a str>,
+        attributes: Option<&'a str>,
+        is_original_title: Option<bool>,
+    },
+    TitleBasics { // tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runtimeMinutes, genres
+        imdb_id: u32, // 0 dupes
+        title_type: &'a str,
+        primary_title: Option<&'a str>,
+        original_title: Option<&'a str>,
+        is_adult: bool,
+        start_year: Option<u32>,
+        end_year: Option<u32>,
+        runtime_minutes: Option<u32>,
+        genres: Option<Vec<&'a str>>,
+    },
+    TitleCrew { // tconst, directors, writers
+        imdb_id: u32, // 0 dupes
+        directors: Option<Vec<u32>>,
+        writers: Option<Vec<u32>>,
+    },
+    TitleEpisode { // tconst, parentTconst, seasonNumber, episodeNumber
+        imdb_id: u32, // 0 dupes
+        series_id: u32,
+        season_number: Option<u32>,
+        episode_number: Option<u32>,
+    },
+    TitleRatings { // tconst, averageRating, numVotes
+        imdb_id: u32, // 0 dupes
+        average_rating: f32,
+        num_votes: u32,
+    },
+}
+
+#[derive(Debug)]
+pub enum ToRowError {
+    Utf8Error {
+        source: std::str::Utf8Error,
+        value: Bytes,
+        row: Vec<Bytes>,
+    },
+    InvalidField {
+        expected: &'static str,
+        value: String,
+        row: Vec<Bytes>,
+    }
 }
 
 impl DatasetKind {
@@ -64,43 +137,53 @@ impl Chunk {
             .iter()
             .enumerate()
             .filter_map(|(i, b)| match (i, b) {
-                (i, b'\t') | (i, b'\n') => Some(i),
-                (i, _) if i + 1 == self.bytes.len() => Some(i),
+                (i, b'\t') | (i, b'\n') => Some((i, b)),
+                (i, b) if i + 1 == self.bytes.len() => Some((i, b)),
                 _ => None,
             });
-        if let Some(i) = iter.next() { // always true
-            extra.part_column = match extra.part_column.is_empty() {
-                true => self.bytes.slice(0..i),
-                false => {
-                    let mut b = BytesMut::with_capacity(extra.part_column.len() + i);
-                    b.extend_from_slice(&extra.part_column);
-                    b.extend_from_slice(&self.bytes.slice(0..i));
-                    b.freeze()
-                },
-            };
-            if i + 1 == self.bytes.len() { // in this case, iterator has only 1 value
-                return Vec::new();
-            }
-        }
-        let mut index: usize = 0;
-        let mut new_part_column = Bytes::new();
-        let mut chunk_rows: Vec<ChunkRow> = Vec::with_capacity(extra.expected_len);
-        let mut iter = std::iter::once(extra.part_column.clone())
-            .filter(|b| !b.is_empty())
-            .chain(extra.columns.clone().into_iter())
-            .chain(iter
-                .filter_map(|i| match (i, index) {
-                    (i, idx) if i + 1 == self.bytes.len() && match (&self.bytes)[i] {
-                        b'\t' | b'\n' => false,
-                        _ => true,
-                    } => {
-                        new_part_column = self.bytes.slice(idx + 1..i + 1);
-                        None
+        let mut index = match iter.next() {
+            Some((i, &b)) => {
+                let idx = match i + 1 == self.bytes.len() && b != b'\t' && b != b'\n' {
+                    true => i + 1,
+                    false => i,
+                };
+                extra.part_column = match &extra.part_column {
+                    None => Some(self.bytes.slice(0..idx)),
+                    Some(old_b) if old_b.is_empty() => Some(self.bytes.slice(0..idx)),
+                    Some(old_b) => {
+                        let mut new_b = BytesMut::with_capacity(old_b.len() + i);
+                        new_b.extend_from_slice(old_b);
+                        new_b.extend_from_slice(&self.bytes.slice(0..idx));
+                        Some(new_b.freeze())
                     },
-                    (i, idx) => {
+                };
+                if idx == self.bytes.len() && b != b'\t' && b != b'\n' {
+                    return Vec::new();
+                }
+                i
+            },
+            None => unreachable!(),
+        };
+        let new_columns;
+        let mut new_part_column = None;
+        let mut chunk_rows: Vec<ChunkRow> = Vec::with_capacity(extra.expected_len);
+        let mut iter = extra.columns.drain(..)
+            .chain(std::iter::once( {
+                let part_column = extra.part_column.as_mut().unwrap();
+                let len = part_column.len();
+                part_column.split_to(len)
+            }))
+            .chain(iter
+                .filter_map(|(i, b)| match (i, b, index) {
+                    (i, b'\t', idx) | (i, b'\n', idx) => {
                         index = i;
                         Some(self.bytes.slice(idx + 1..i))
                     },
+                    (i, _, idx) if i + 1 == self.bytes.len() => {
+                        new_part_column = Some(self.bytes.slice(idx + 1..i + 1));
+                        None
+                    },
+                    _ => unreachable!(),
                 })
             );
         loop {
@@ -108,189 +191,175 @@ impl Chunk {
                 .by_ref()
                 .take(self.kind.count())
                 .collect();
+            // println!("{}: {:?}", extra.expected_len, row);
             match row.len() == self.kind.count() {
                 true => chunk_rows.push(ChunkRow {
                     bytes: row,
                     kind: self.kind,
                 }),
                 false => {
-                    extra.columns = row;
+                    new_columns = row;
                     break;
                 },
             }
         }
+        std::mem::drop(iter); // makes extra assignable! specifically, columns, since part_column is cloned.
+        extra.columns = new_columns;
         extra.part_column = new_part_column;
         extra.expected_len = std::cmp::max(extra.expected_len, chunk_rows.len());
         chunk_rows
     }
 }
 
-// pub struct CElement {
-//     pub 
-// }
-
-// pub struct CRow {
-//     elements: Vec<CElement>,
-// }
-
-// pub struct CElement {
-// }
-
-// pub struct IntoByteRows {
-
-//     pub prejunct: Bytes,
-//     pub rows: ,
-//     pub postjunct: Bytes,
-// }
-
-// impl From<Chunk> for IntoByteRows {
-//     fn from(value: Chunk) -> Self {
-//         let mut rows: Vec<Vec<>>
-//         let mut index: usize = 0;
-
-//     }
-// }
-
-// #[derive(Debug, From)]
-// pub struct ByteRow {
-//     pub bytes: Vec<Bytes>,
-//     pub kind: DatasetKind,
-// }
-
-// impl ByteRow {
-//     fn new(kind: DatasetKind) -> Self {
-//         Self {
-//             bytes: Vec::with_capacity(match kind {
-//                 DatasetKind::TitlePrincipals => 6,
-//                 DatasetKind::NameBasics => 6,
-//                 DatasetKind::TitleAkas => 8,
-//                 DatasetKind::TitleBasics => 9,
-//                 DatasetKind::TitleCrew => 3,
-//                 DatasetKind::TitleEpisode => 4,
-//                 DatasetKind::TitleRatings => 3,
-//             }),
-//             kind: kind,
-//         }
-//     }
-// }
-
-// impl Chunk {
-//     pub fn into_byte_rows(self) -> (Bytes, Bytes, Bytes)
-// }
-
-// #[derive(Debug, Display, Error)]
-// #[display(fmt =
-//     "Error converting Bytes to ByteRow.\n\tBytes: {:?}\n\tKind: {:?}\n\tExpected Length: {}",
-//     row, kind, expected_len,
-// )]
-// pub struct ByteRowError {
-//     row: Vec<Bytes>,
-//     kind: DatasetKind,
-//     expected_len: usize,
-// }
-
-// const SPLIT: u8 = b'\t';
-
-// impl ByteRow {
-//     pub fn new(bytes: Bytes, kind: DatasetKind) -> Result<Self, ByteRowError> {
-//         let row: Vec<Bytes> = Vec::with_capacity(Self::expected_len(kind));
-//         let indexes = bytes.iter()
-//             .enumerate()
-//             .filter_map(|(i, b)| match b == &SPLIT {
-//                 true => Some(i),
-//                 false => None,
-//             })
-//             .peekable();
-//         if let Some(i) = indexes.peek() {
-//             row.push(bytes.slice(0..*i));
-//         }
-//         for index in indexes {
-//             match indexes.peek() {
-//                 Some(i) => row.push(bytes.slice(index + 1..*i)),
-//                 None => row.push(bytes.slice(index + 1..bytes.len())),
-//             };
-//         }
-//         match row.len() == Self::expected_len(kind) {
-//             true => Ok(Self {
-//                 bytes: row,
-//                 kind: kind,
-//             }),
-//             false => Err(ByteRowError {
-//                 row: row,
-//                 kind: kind,
-//                 expected_len: Self::expected_len(kind),
-//             })
-//         }
-//     }
-//     fn expected_len(kind: DatasetKind) -> usize {
-//         match kind {
-//             DatasetKind::TitlePrincipals => 6,
-//             DatasetKind::NameBasics => 6,
-//             DatasetKind::TitleAkas => 8,
-//             DatasetKind::TitleBasics => 9,
-//             DatasetKind::TitleCrew => 3,
-//             DatasetKind::TitleEpisode => 4,
-//             DatasetKind::TitleRatings => 3,
-//         }
-//     }
-// }
-
-// #[derive(Debug)]
-// pub enum Row<'a> {
-//     TitlePrincipals { // tconst, ordering, nconst, category, job, characters
-//         imdb_id: i32, // n dupes
-//         ordering: i32,
-//         name_id: i32,
-//         category: &'a str,
-//         job: Option<&'a str>,
-//         characters: Option<&'a str>,
-//     },
-//     NameBasics { // nconst, primaryName, birthYear, deathYear, primaryProfession, knownForTitles
-//         name_id: i32,
-//         name: &'a str,
-//         birth_year: Option<i32>,
-//         death_year: Option<i32>,
-//         primary_profession: Option<Vec<&'a str>>,
-//         imdb_ids: Option<Vec<i32>>,
-//     },
-//     TitleAkas { // titleId, ordering, title, region, language, types, attributes, isOriginalTitle
-//         imdb_id: i32, // ~n/2 dupes
-//         ordering: i32,
-//         title: Option<&'a str>,
-//         region: Option<&'a str>,
-//         language: Option<&'a str>,
-//         types: Option<&'a str>,
-//         attributes: Option<&'a str>,
-//         is_original_title: Option<bool>,
-//     },
-//     TitleBasics { // tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runtimeMinutes, genres
-//         imdb_id: i32, // 0 dupes
-//         title_type: &'a str,
-//         primary_title: Option<&'a str>,
-//         original_title: Option<&'a str>,
-//         is_adult: bool,
-//         start_year: Option<i32>,
-//         end_year: Option<i32>,
-//         runtime_minutes: Option<i32>,
-//         genres: Option<Vec<&'a str>>,
-//     },
-//     TitleCrew { // tconst, directors, writers
-//         imdb_id: i32, // 0 dupes
-//         directors: Option<Vec<i32>>,
-//         writers: Option<Vec<i32>>,
-//     },
-//     TitleEpisode { // tconst, parentTconst, seasonNumber, episodeNumber
-//         imdb_id: i32, // 0 dupes
-//         series_id: i32,
-//         season_number: Option<i32>,
-//         episode_number: Option<i32>,
-//     },
-//     TitleRatings { // tconst, averageRating, numVotes
-//         imdb_id: i32, // 0 dupes
-//         average_rating: f32,
-//         num_votes: i32,
-//     },
-// }
+impl ChunkRow {
+    pub fn to_row<'a>(&'a self) -> Result<Row<'a>, ToRowError> {
+        let map_none = |s: &'a str| -> Option<&'a str> {
+            match s {
+                "\\N" => None,
+                "" => None,
+                s if s.chars().all(|c| c == ' ') => None,
+                s => Some(s),
+            }
+        };
+        let map_u32 = |s: &'a str| -> Result<u32, ToRowError> {
+            s.parse().map_err(|_| ToRowError::InvalidField {
+                expected: "A valid unsigned integer",
+                value: s.to_string(),
+                row: self.bytes.clone(),
+            })
+        };
+        let map_f32 = |s: &'a str| -> Result<f32, ToRowError> {
+            s.parse().map_err(|_| ToRowError::InvalidField {
+                expected: "A valid float",
+                value: s.to_string(),
+                row: self.bytes.clone(),
+            })
+        };
+        let map_id = |s: &'a str| -> Result<u32, ToRowError> {
+            if let Some(s) = s.get(2..) {
+                if let Ok(u) = map_u32(s) {
+                    return Ok(u);
+                }
+            }
+            Err(ToRowError::InvalidField {
+                expected: "A valid id: 2 characters followed by 7 or more digits",
+                value: s.to_string(),
+                row: self.bytes.clone(),
+            })
+        };
+        let map_bool = |s: &'a str| -> Result<bool, ToRowError> {
+            match s {
+                "0" => Ok(false),
+                "1" => Ok(true),
+                _ => Err(ToRowError::InvalidField {
+                    expected: "A bool: either 1 or 0",
+                    value: s.to_string(),
+                    row: self.bytes.clone(),
+                })
+            }
+        };
+        let map_principal_characters = |s: &'a str| -> Result<&'a str, ToRowError> {
+            if let Some(s) = s.get(2..s.len() - 1) {
+                return Ok(s);
+            }
+            Err(ToRowError::InvalidField {
+                expected: "A slice starting with '[\"' and ending with '\"]",
+                value: s.to_string(),
+                row: self.bytes.clone(),
+            })
+        };
+        let mut iter = self.bytes
+            .iter()
+            .map(|b| std::str::from_utf8(b)
+                .map_err(|e| ToRowError::Utf8Error {
+                    source: e,
+                    value: b.clone(),
+                    row: self.bytes.clone(),
+                })
+            );
+        match self.kind {
+            DatasetKind::TitlePrincipals => Ok(Row::TitlePrincipals {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                ordering: map_u32(iter.next().unwrap()?)?,
+                name_id: map_id(iter.next().unwrap()?)?,
+                category: iter.next().unwrap()?,
+                job: map_none(iter.next().unwrap()?),
+                characters: map_none(iter.next().unwrap()?)
+                    .map(|s| map_principal_characters(s))
+                    .transpose()?,
+            }),
+            DatasetKind::NameBasics => Ok(Row::NameBasics {
+                name_id: map_id(iter.next().unwrap()?)?,
+                name: iter.next().unwrap()?,
+                birth_year: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                death_year: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                primary_profession: map_none(iter.next().unwrap()?)
+                    .map(|s| s.split(',').collect()),
+                imdb_ids: map_none(iter.next().unwrap()?)
+                    .map(|s| s.split(',').map(|id| map_id(id)).collect())
+                    .transpose()?,
+            }),
+            DatasetKind::TitleAkas => Ok(Row::TitleAkas {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                ordering: map_u32(iter.next().unwrap()?)?,
+                title: map_none(iter.next().unwrap()?),
+                region: map_none(iter.next().unwrap()?),
+                language: map_none(iter.next().unwrap()?),
+                types: map_none(iter.next().unwrap()?),
+                attributes: map_none(iter.next().unwrap()?),
+                is_original_title: map_none(iter.next().unwrap()?)
+                    .map(|s| map_bool(s))
+                    .transpose()?,
+            }),
+            DatasetKind::TitleBasics => Ok(Row::TitleBasics {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                title_type: iter.next().unwrap()?,
+                primary_title: map_none(iter.next().unwrap()?),
+                original_title: map_none(iter.next().unwrap()?),
+                is_adult: map_bool(iter.next().unwrap()?)?,
+                start_year: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                end_year: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                runtime_minutes: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                genres: map_none(iter.next().unwrap()?)
+                    .map(|s| s.split(',').collect()),
+            }),
+            DatasetKind::TitleCrew => Ok(Row::TitleCrew {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                directors: map_none(iter.next().unwrap()?)
+                    .map(|s| s.split(',').map(|id| map_id(id)).collect())
+                    .transpose()?,
+                writers: map_none(iter.next().unwrap()?)
+                    .map(|s| s.split(',').map(|id| map_id(id)).collect())
+                    .transpose()?,
+            }),
+            DatasetKind::TitleEpisode => Ok(Row::TitleEpisode {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                series_id: map_id(iter.next().unwrap()?)?,
+                season_number: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+                episode_number: map_none(iter.next().unwrap()?)
+                    .map(|s| map_u32(s))
+                    .transpose()?,
+            }),
+            DatasetKind::TitleRatings => Ok(Row::TitleRatings {
+                imdb_id: map_id(iter.next().unwrap()?)?,
+                average_rating: map_f32(iter.next().unwrap()?)?,
+                num_votes: map_u32(iter.next().unwrap()?)?,
+            }),
+        }
+    }
+}
 
 // #[derive(Debug, Default, Clone)]
 // pub struct TitleInfo {
@@ -339,229 +408,4 @@ impl Chunk {
 //     pub characters: Option<Vec<String>>,
 //     pub writer: bool,
 //     pub director: bool,
-// }
-
-#[derive(Debug, Display, Error)]
-pub enum Error {
-    #[display(fmt = "The following bytes were found to be invalid UTF-8:\n'{:?}'", chunk)]
-    Utf8Error {
-        source: std::str::Utf8Error,
-        chunk: bytes::Bytes,
-    },
-    #[display(fmt = "The following value was an invalid integer: '{}'\nRow: '{:?}'", value, row)]
-    StrToIntError {
-        source: <i32 as std::str::FromStr>::Err,
-        value: String,
-        row: Vec<String>,
-    },
-    #[display(fmt = "The following value was an invalid float: '{}'\nRow: '{:?}'", value, row)]
-    StrToFloatError {
-        source: <f32 as std::str::FromStr>::Err,
-        value: String,
-        row: Vec<String>,
-    },
-    #[display(fmt = "Error when parsing\nExpected: '{}'\nFound: '{}'\nRow: '{:?}'", expected, value, row)]
-    InvalidField {
-        value: String,
-        row: Vec<String>,
-        expected: &'static str,
-    },
-    #[display(fmt =
-        "The row of kind '{:?}' was an invalid length.\nExpected: '{}'\nFound: '{}'\nRow: '{:?}'",
-        kind, expected, found, row,
-    )]
-    RowLengthError {
-        kind: DatasetKind,
-        row: Vec<String>,
-        expected: usize,
-        found: usize,
-    },
-}
-
-// impl From<(Bytes, DatasetKind)> for Chunk {
-//     fn from(v: (Bytes, DatasetKind)) -> Self {
-//         match v.1 {
-//             DatasetKind::TitlePrincipals => Self::TitlePrincipals(v.0),
-//             DatasetKind::NameBasics => Self::NameBasics(v.0),
-//             DatasetKind::TitleAkas => Self::TitleAkas(v.0),
-//             DatasetKind::TitleBasics => Self::TitleBasics(v.0),
-//             DatasetKind::TitleCrew => Self::TitleCrew(v.0),
-//             DatasetKind::TitleEpisode => Self::TitleEpisode(v.0),
-//             DatasetKind::TitleRatings => Self::TitleRatings(v.0),
-//         }
-//     }
-// }
-
-// impl Rows {
-//     pub(super) fn new(bytes: bytes::Bytes, kind: DatasetKind) -> Self {
-//         Self {
-//             inner: bytes,
-//             kind: kind,
-//         }
-//     }
-//     pub fn try_iter<'a>(&'a self) -> Result<impl Iterator<Item = Result<Row<'a>, Error>>, Error> {
-//         Ok(RowsIter {
-//             inner: std::str::from_utf8(&self.inner)
-//                 .map_err(|e| Error::Utf8Error {
-//                     source: e,
-//                     chunk: self.inner.clone(),
-//                 })?
-//                 .split('\n')
-//                 .filter(|&str| str != "")
-//                 .map(|row| row.split('\t')),
-//             kind: self.kind,
-//         })
-//     }
-// }
-
-// impl<'a, T: Iterator<Item = impl Iterator<Item = &'a str>>> Iterator for RowsIter<T> {
-//     type Item = Result<Row<'a>, Error>;
-//     fn next(&mut self) -> Option<Self::Item> {
-//         match self.inner.next() {
-//             Some(iter) => Some(Row::try_from_iter(iter, self.kind)),
-//             None => None,
-//         }
-//     }
-// }
-
-// impl<'a> Row<'a> {
-//     fn try_from_iter(
-//         iter: impl Iterator<Item = &'a str>,
-//         kind: DatasetKind,
-//     ) -> Result<Self, Error>
-//     {
-//         let row: Vec<&'a str> = iter.collect();
-        
-//         let assert_len = |i: usize| -> Result<(), Error> {
-//             match row.len() {
-//                 len if len == i => Ok(()),
-//                 _ => Err(Error::RowLengthError {
-//                     kind: kind,
-//                     found: row.len(),
-//                     row: row.iter().map(|s| s.to_string()).collect(),
-//                     expected: i,
-//                 }),
-//             }
-//         };
-//         let map_none = |s: &'a str| -> Option<&'a str> {
-//             match s {
-//                 "\\N" => None,
-//                 "" => None,
-//                 s if s.chars().all(|c| c == ' ') => None,
-//                 s => Some(s),
-//             }
-//         };
-//         let map_int = |s: &'a str| -> Result<i32, Error> {
-//             s.parse().map_err(|e| Error::StrToIntError {
-//                 source: e,
-//                 value: s.to_string(),
-//                 row: row.iter().map(|s| s.to_string()).collect(),
-//             })
-//         };
-//         let map_id = |s: &'a str| -> Result<i32, Error> {
-//             match s.get(2..) {
-//                 Some(s) => map_int(s),
-//                 None => Err(Error::InvalidField {
-//                     value: s.to_string(),
-//                     row: row.iter().map(|s| s.to_string()).collect(),
-//                     expected: "a Valid ID",
-//                 })
-//             }
-//         };
-//         let map_float = |s: &'a str| -> Result<f32, Error> {
-//             s.parse().map_err(|e| Error::StrToFloatError {
-//                 source: e,
-//                 value: s.to_string(),
-//                 row: row.iter().map(|s| s.to_string()).collect(),
-//             })
-//         };
-//         let map_bool = |s: &'a str| -> Result<bool, Error> {
-//             match s {
-//                 "0" => Ok(false),
-//                 "1" => Ok(true),
-//                 _ => Err(Error::InvalidField {
-//                     value: s.to_string(),
-//                     row: row.iter().map(|s| s.to_string()).collect(),
-//                     expected: "a bool: either 1 or 0",
-//                 })
-//             }
-//         };
-
-//         match kind {
-//             DatasetKind::TitlePrincipals => {
-//                 assert_len(6)?;
-//                 Ok(Self::TitlePrincipals {
-//                     imdb_id: map_id(row[0])?,
-//                     ordering: map_int(row[1])?,
-//                     name_id: map_id(row[2])?,
-//                     category: row[3],
-//                     job: map_none(row[4]),
-//                     characters: map_none(row[5]),
-//                 })
-//             },
-//             DatasetKind::NameBasics => {
-//                 assert_len(6)?;
-//                 Ok(Self::NameBasics {
-//                     name_id: map_id(row[0])?,
-//                     name: row[1],
-//                     birth_year: map_none(row[2]).map(|s| map_int(s)).transpose()?,
-//                     death_year: map_none(row[3]).map(|s| map_int(s)).transpose()?,
-//                     primary_profession: map_none(row[4]).map(|s| s.split(',').collect()),
-//                     imdb_ids: map_none(row[5]).map(|s| s.split(',').map(|id| map_id(id)).collect()).transpose()?,
-//                 })
-//             },
-//             DatasetKind::TitleAkas => {
-//                 assert_len(8)?;
-//                 Ok(Self::TitleAkas {
-//                     imdb_id: map_id(row[0])?,
-//                     ordering: map_int(row[1])?,
-//                     title: map_none(row[2]),
-//                     region: map_none(row[3]),
-//                     language: map_none(row[4]),
-//                     types: map_none(row[5]),
-//                     attributes: map_none(row[6]),
-//                     is_original_title: map_none(row[7]).map(|s| map_bool(s)).transpose()?,
-//                 })
-//             },
-//             DatasetKind::TitleBasics => {
-//                 assert_len(9)?;
-//                 Ok(Self::TitleBasics {
-//                     imdb_id: map_id(row[0])?,
-//                     title_type: row[1],
-//                     primary_title: map_none(row[2]),
-//                     original_title: map_none(row[3]),
-//                     is_adult: map_bool(row[4])?,
-//                     start_year: map_none(row[5]).map(|s| map_int(s)).transpose()?,
-//                     end_year: map_none(row[6]).map(|s| map_int(s)).transpose()?,
-//                     runtime_minutes: map_none(row[7]).map(|s| map_int(s)).transpose()?,
-//                     genres: map_none(row[8]).map(|s| s.split(',').collect()),
-//                 })
-//             },
-//             DatasetKind::TitleCrew => {
-//                 assert_len(3)?;
-//                 Ok(Self::TitleCrew {
-//                     imdb_id: map_id(row[0])?,
-//                     directors: map_none(row[1]).map(|s| s.split(',').map(|id| map_id(id)).collect()).transpose()?,
-//                     writers: map_none(row[2]).map(|s| s.split(',').map(|id| map_id(id)).collect()).transpose()?,
-//                 })
-//             },
-//             DatasetKind::TitleEpisode => {
-//                 assert_len(4)?;
-//                 Ok(Self::TitleEpisode {
-//                     imdb_id: map_id(row[0])?,
-//                     series_id: map_id(row[1])?,
-//                     season_number: map_none(row[2]).map(|s| map_int(s)).transpose()?,
-//                     episode_number: map_none(row[3]).map(|s| map_int(s)).transpose()?,
-//                 })
-//             },
-//             DatasetKind::TitleRatings => {
-//                 assert_len(3)?;
-//                 Ok(Self::TitleRatings {
-//                     imdb_id: map_id(row[0])?,
-//                     average_rating: map_float(row[1])?,
-//                     num_votes: map_int(row[2])?,
-//                 })
-//             },
-//         }
-//     }
 // }

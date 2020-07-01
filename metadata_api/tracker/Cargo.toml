@@ -15,7 +15,7 @@ derive_more = "^0.99"
 derive-new = "^0.5"
 lazy_static = "^1.4"
 reqwest = { path = "../../../reqwest", default-features = false, features = ["rustls-tls", "stream"] }
-sqlx = { version = "^0.3", features = ["macros", "sqlite"] }
+sqlx = { version = "^0.3", features = ["macros", "postgres"] }
 bytes = "^0.5"
 tokio = { version = "^0.2", features = ["rt-threaded", "sync", "fs", "macros"] }
 async-compression = { version = "^0.3", features = ["gzip", "stream"], default-features = false }

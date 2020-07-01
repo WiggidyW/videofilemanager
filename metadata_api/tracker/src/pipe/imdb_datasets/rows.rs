@@ -17,11 +17,9 @@ mod chunk_row_pipe {
     use crate::pipe::Pipe;
     use async_trait::async_trait;
     use std::sync::Arc;
-    use bytes::{Bytes, BytesMut};
     use futures::stream::Stream;
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use std::collections::VecDeque;
 
     struct ChunkRowStream<S> {
         stream: S,
@@ -40,12 +38,11 @@ mod chunk_row_pipe {
         type Error = ChunkRowPipeError<P::Error>;
         type Stream = impl Stream<Item = Result<ChunkRow, Self::Error>> + Send + Unpin;
         async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
-            Ok(ChunkRowStream::new(
-                self.chunk_pipe
-                    .get(token)
-                    .await
-                    .map_err(|e| ChunkRowPipeError::ChunkPipeError(e))?
-            ))
+            use futures::stream::StreamExt;
+            match self.chunk_pipe.get(token).await {
+                Ok(stream) => Ok(ChunkRowStream::new(stream).skip(1)), // skip the header row
+                Err(e) => Err(ChunkRowPipeError::ChunkPipeError(e)),
+            }
         }
     }
 
