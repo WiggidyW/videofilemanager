@@ -191,7 +191,6 @@ impl Chunk {
                 .by_ref()
                 .take(self.kind.count())
                 .collect();
-            // println!("{}: {:?}", extra.expected_len, row);
             match row.len() == self.kind.count() {
                 true => chunk_rows.push(ChunkRow {
                     bytes: row,
