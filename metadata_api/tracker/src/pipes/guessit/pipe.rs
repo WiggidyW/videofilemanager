@@ -26,7 +26,7 @@ mod guessit_pipe {
     impl Pipe<Filename, GuessitDict> for GuessitPipe {
         type Error = GuessitPipeError;
         type Stream = futures::stream::Iter<std::vec::IntoIter<Result<GuessitDict, Self::Error>>>;
-        async fn pull(self: &Arc<Self>, token: Filename) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: Arc<Self>, token: Filename) -> Result<Self::Stream, Self::Error> {
             Ok(futures::stream::iter(vec![Ok(
                 self.guess(token)?
             )]))

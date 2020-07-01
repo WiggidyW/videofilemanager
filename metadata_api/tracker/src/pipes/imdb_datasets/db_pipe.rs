@@ -22,9 +22,7 @@ mod postgres_pipe {
     use futures::stream::{Stream, StreamExt};
     use async_trait::async_trait;
     use std::sync::Arc;
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
+    use tokio::sync::mpsc as tokio_mpsc;
 
     pub struct PgInsertStream<S> {
         pool: sqlx::PgPool,
@@ -104,8 +102,8 @@ num_votes = $3
     impl<P: Pipe<DatasetKind, ChunkRow>> Pipe<DatasetKind, ()> for PgPipe<P> {
         type Error = PgPipeError<P::Error>;
         type Stream = impl Stream<Item = Result<(), Self::Error>> + Send + Unpin;
-        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
-            let stream = self.chunk_row_pipe
+        async fn pull(self: Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+            let stream = self.chunk_row_pipe.clone()
                 .pull(token)
                 .await
                 .map_err(|e| PgPipeError::ChunkRowPipeError(e))?
@@ -117,6 +115,25 @@ num_votes = $3
                     Ok(())
                 }));
             Ok(stream)
+        }
+    }
+
+    #[async_trait]
+    impl<P: Pipe<DatasetKind, ChunkRow>> Pipe<Refresh, ()> for PgPipe<P> {
+        type Error = PgPipeError<P::Error>;
+        type Stream = impl Stream<Item = Result<(), Self::Error>> + Send + Unpin;
+        async fn pull(self: Arc<Self>, _: Refresh) -> Result<Self::Stream, Self::Error> {
+            let (tx, rx) = tokio_mpsc::unbounded_channel();
+            for kind in DatasetKind::iter() {
+                let tx = tx.clone();
+                let mut stream = <Self as Pipe<DatasetKind, ()>>::pull(self.clone(), kind).await?;
+                let _ = tokio::spawn(async move {
+                    while let Some(result) = stream.next().await {
+                        tx.send(result).unwrap();
+                    }
+                });
+            }
+            Ok(rx)
         }
     }
     

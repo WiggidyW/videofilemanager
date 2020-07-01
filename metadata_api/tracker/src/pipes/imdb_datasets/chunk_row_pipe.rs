@@ -37,9 +37,9 @@ mod chunk_row_pipe {
     impl<P: Pipe<DatasetKind, Chunk>> Pipe<DatasetKind, ChunkRow> for ChunkRowPipe<P> {
         type Error = ChunkRowPipeError<P::Error>;
         type Stream = impl Stream<Item = Result<ChunkRow, Self::Error>> + Send + Unpin;
-        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             use futures::stream::StreamExt;
-            match self.chunk_pipe.pull(token).await {
+            match self.chunk_pipe.clone().pull(token).await {
                 Ok(stream) => Ok(ChunkRowStream::new(stream).skip(1)), // skip the header row
                 Err(e) => Err(ChunkRowPipeError::ChunkPipeError(e)),
             }

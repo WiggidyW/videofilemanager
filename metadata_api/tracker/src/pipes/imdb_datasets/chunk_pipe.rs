@@ -60,7 +60,7 @@ mod http_pipe {
     impl Pipe<DatasetKind, Chunk> for HttpPipe {
         type Error = HttpPipeError;
         type Stream = impl Stream<Item = Result<Chunk, Self::Error>> + Send + Unpin;
-        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             let url = match token {
                 DatasetKind::TitlePrincipals => "https://datasets.imdbws.com/title.principals.tsv.gz",
                 DatasetKind::NameBasics => "https://datasets.imdbws.com/name.basics.tsv.gz",
@@ -106,14 +106,14 @@ mod local_file_pipe {
     }
 
     #[async_trait]
-    impl<P: AsRef<Path> + Send + Sync> Pipe<DatasetKind, Chunk> for LocalFilePipe<P> {
+    impl<P: AsRef<Path> + Send + Sync + 'static> Pipe<DatasetKind, Chunk> for LocalFilePipe<P> {
         type Error = LocalFilePipeError;
         type Stream = impl Stream<Item = Result<Chunk, Self::Error>> + Send + Unpin;
-        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             let stream = GzipDecoder::new(
                 tokio_util::codec::FramedRead::new(
-                    tokio::fs::File::open(self.file_map[&token].as_ref()).await?,
-                    tokio_util::codec::BytesCodec::new(),
+                        tokio::fs::File::open(self.file_map[&token].as_ref()).await?,
+                        tokio_util::codec::BytesCodec::new(),
                     )
                     .map(|result| result.map(|b| b.freeze()))
                 )
