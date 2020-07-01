@@ -1,5 +1,5 @@
-
 use derive_more::{Display, Error, From};
+use super::GuessitDict;
 
 pub struct GuessitPipe;
 
@@ -14,10 +14,9 @@ pub enum GuessitPipeError {
 }
 
 mod guessit_pipe {
-    use super::{GuessitPipe, GuessitPipeError};
-    use crate::token::Filename;
-    use crate::pipe::Pipe;
-    use crate::pipe::guessit::GuessitDict;
+    use super::{GuessitPipe, GuessitPipeError, GuessitDict};
+    use crate::tokens::Filename;
+    use crate::Pipe;
     use pyo3::types::IntoPyDict;
     use async_trait::async_trait;
     use std::sync::Arc;
@@ -27,7 +26,7 @@ mod guessit_pipe {
     impl Pipe<Filename, GuessitDict> for GuessitPipe {
         type Error = GuessitPipeError;
         type Stream = futures::stream::Iter<std::vec::IntoIter<Result<GuessitDict, Self::Error>>>;
-        async fn get(self: &Arc<Self>, token: Filename) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: &Arc<Self>, token: Filename) -> Result<Self::Stream, Self::Error> {
             Ok(futures::stream::iter(vec![Ok(
                 self.guess(token)?
             )]))

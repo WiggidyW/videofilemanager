@@ -1,14 +1,13 @@
 mod data;
+pub use data::*;
 
 pub mod db_pipe;
 pub mod chunk;
 pub mod rows;
 
-pub use data::*;
-
 #[cfg(test)]
 mod tests {
-    use crate::pipe::Pipe;
+    use crate::Pipe;
     use futures::stream::StreamExt;
     use super::*;
     use std::convert::TryFrom;

@@ -63,14 +63,25 @@ CREATE FUNCTION title_crew(INTEGER, INTEGER[], INTEGER[])
             VALUES ( $1, $2[writer], (0, 'writer', NULL, NULL) )
             ON CONFLICT ( imdb_id )
             DO UPDATE SET
-                principals = array_append(EXCLUDED.principals, ( 0, 'writer', NULL, NULL ));
+                principals = array_append(EXCLUDED.principals, (0, 'writer', NULL, NULL));
         END LOOP;
         FOR director IN 1 .. array_upper($3, 1) LOOP
             INSERT INTO title_person ( imdb_id, name_id, principals )
             VALUES ( $1, $3[director], (0, 'director', NULL, NULL) )
             ON CONFLICT ( imdb_id )
             DO UPDATE SET
-                principals = array_append(EXCLUDED.principals, ( 0, 'director', NULL, NULL ));
+                principals = array_append(EXCLUDED.principals, (0, 'director', NULL, NULL));
         END LOOP;
     END;
     $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION title_principals(INTEGER, INTEGER, INTEGER, TEXT, TEXT, TEXT)
+	RETURNS VOID AS $$
+	BEGIN
+		INSERT INTO title_person ( imdb_id, name_id, principals )
+		VALUES ( $1, $3, ($2, $4, $5, $6) )
+		ON CONFLICT ( imdb_id )
+		DO UPDATE SET
+			principals = array_append(EXCLUDED.principals, ($2, $4, $5, $6));
+	END;
+	$$ LANGUAGE plpgsql;

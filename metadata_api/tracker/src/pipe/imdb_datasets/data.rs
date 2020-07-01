@@ -35,24 +35,24 @@ pub struct ChunkRow {
 #[derive(Debug)]
 pub enum Row<'a> {
     TitlePrincipals { // tconst, ordering, nconst, category, job, characters
-        imdb_id: u32, // n dupes
-        ordering: u32,
-        name_id: u32,
+        imdb_id: i32, // n dupes
+        ordering: i32,
+        name_id: i32,
         category: &'a str,
         job: Option<&'a str>,
         characters: Option<&'a str>,
     },
     NameBasics { // nconst, primaryName, birthYear, deathYear, primaryProfession, knownForTitles
-        name_id: u32,
+        name_id: i32,
         name: &'a str,
-        birth_year: Option<u32>,
-        death_year: Option<u32>,
+        birth_year: Option<i32>,
+        death_year: Option<i32>,
         primary_profession: Option<Vec<&'a str>>,
-        imdb_ids: Option<Vec<u32>>,
+        imdb_ids: Option<Vec<i32>>,
     },
     TitleAkas { // titleId, ordering, title, region, language, types, attributes, isOriginalTitle
-        imdb_id: u32, // ~n/2 dupes
-        ordering: u32,
+        imdb_id: i32, // ~n/2 dupes
+        ordering: i32,
         title: Option<&'a str>,
         region: Option<&'a str>,
         language: Option<&'a str>,
@@ -61,41 +61,43 @@ pub enum Row<'a> {
         is_original_title: Option<bool>,
     },
     TitleBasics { // tconst, titleType, primaryTitle, originalTitle, isAdult, startYear, endYear, runtimeMinutes, genres
-        imdb_id: u32, // 0 dupes
+        imdb_id: i32, // 0 dupes
         title_type: &'a str,
         primary_title: Option<&'a str>,
         original_title: Option<&'a str>,
         is_adult: bool,
-        start_year: Option<u32>,
-        end_year: Option<u32>,
-        runtime_minutes: Option<u32>,
+        start_year: Option<i32>,
+        end_year: Option<i32>,
+        runtime_minutes: Option<i32>,
         genres: Option<Vec<&'a str>>,
     },
     TitleCrew { // tconst, directors, writers
-        imdb_id: u32, // 0 dupes
-        directors: Option<Vec<u32>>,
-        writers: Option<Vec<u32>>,
+        imdb_id: i32, // 0 dupes
+        directors: Option<Vec<i32>>,
+        writers: Option<Vec<i32>>,
     },
     TitleEpisode { // tconst, parentTconst, seasonNumber, episodeNumber
-        imdb_id: u32, // 0 dupes
-        series_id: u32,
-        season_number: Option<u32>,
-        episode_number: Option<u32>,
+        imdb_id: i32, // 0 dupes
+        series_id: i32,
+        season_number: Option<i32>,
+        episode_number: Option<i32>,
     },
     TitleRatings { // tconst, averageRating, numVotes
-        imdb_id: u32, // 0 dupes
+        imdb_id: i32, // 0 dupes
         average_rating: f32,
-        num_votes: u32,
+        num_votes: i32,
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Display, Error)]
 pub enum ToRowError {
+    #[display(fmt = "Encountered field that was invalid UTF-8\nErr: {}\nValue: '{:?}'\nRow: '{:?}'", source, value, row)]
     Utf8Error {
         source: std::str::Utf8Error,
         value: Bytes,
         row: Vec<Bytes>,
     },
+    #[display(fmt = "Encountered invalid field, expected: '{}', found: '{}'\nRow: '{:?}'", expected, value, row)]
     InvalidField {
         expected: &'static str,
         value: String,
@@ -220,9 +222,9 @@ impl ChunkRow {
                 s => Some(s),
             }
         };
-        let map_u32 = |s: &'a str| -> Result<u32, ToRowError> {
+        let map_i32 = |s: &'a str| -> Result<i32, ToRowError> {
             s.parse().map_err(|_| ToRowError::InvalidField {
-                expected: "A valid unsigned integer",
+                expected: "A valid integer",
                 value: s.to_string(),
                 row: self.bytes.clone(),
             })
@@ -234,9 +236,9 @@ impl ChunkRow {
                 row: self.bytes.clone(),
             })
         };
-        let map_id = |s: &'a str| -> Result<u32, ToRowError> {
+        let map_id = |s: &'a str| -> Result<i32, ToRowError> {
             if let Some(s) = s.get(2..) {
-                if let Ok(u) = map_u32(s) {
+                if let Ok(u) = map_i32(s) {
                     return Ok(u);
                 }
             }
@@ -279,7 +281,7 @@ impl ChunkRow {
         match self.kind {
             DatasetKind::TitlePrincipals => Ok(Row::TitlePrincipals {
                 imdb_id: map_id(iter.next().unwrap()?)?,
-                ordering: map_u32(iter.next().unwrap()?)?,
+                ordering: map_i32(iter.next().unwrap()?)?,
                 name_id: map_id(iter.next().unwrap()?)?,
                 category: iter.next().unwrap()?,
                 job: map_none(iter.next().unwrap()?),
@@ -291,10 +293,10 @@ impl ChunkRow {
                 name_id: map_id(iter.next().unwrap()?)?,
                 name: iter.next().unwrap()?,
                 birth_year: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 death_year: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 primary_profession: map_none(iter.next().unwrap()?)
                     .map(|s| s.split(',').collect()),
@@ -304,7 +306,7 @@ impl ChunkRow {
             }),
             DatasetKind::TitleAkas => Ok(Row::TitleAkas {
                 imdb_id: map_id(iter.next().unwrap()?)?,
-                ordering: map_u32(iter.next().unwrap()?)?,
+                ordering: map_i32(iter.next().unwrap()?)?,
                 title: map_none(iter.next().unwrap()?),
                 region: map_none(iter.next().unwrap()?),
                 language: map_none(iter.next().unwrap()?),
@@ -321,13 +323,13 @@ impl ChunkRow {
                 original_title: map_none(iter.next().unwrap()?),
                 is_adult: map_bool(iter.next().unwrap()?)?,
                 start_year: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 end_year: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 runtime_minutes: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 genres: map_none(iter.next().unwrap()?)
                     .map(|s| s.split(',').collect()),
@@ -345,16 +347,16 @@ impl ChunkRow {
                 imdb_id: map_id(iter.next().unwrap()?)?,
                 series_id: map_id(iter.next().unwrap()?)?,
                 season_number: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
                 episode_number: map_none(iter.next().unwrap()?)
-                    .map(|s| map_u32(s))
+                    .map(|s| map_i32(s))
                     .transpose()?,
             }),
             DatasetKind::TitleRatings => Ok(Row::TitleRatings {
                 imdb_id: map_id(iter.next().unwrap()?)?,
                 average_rating: map_f32(iter.next().unwrap()?)?,
-                num_votes: map_u32(iter.next().unwrap()?)?,
+                num_votes: map_i32(iter.next().unwrap()?)?,
             }),
         }
     }

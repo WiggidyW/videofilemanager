@@ -1,4 +1,4 @@
-use super::DatasetKind;
+use super::{DatasetKind, Chunk};
 use derive_more::{Display, Error, From};
 use std::io;
 use std::collections::HashMap;
@@ -26,9 +26,8 @@ pub enum LocalFilePipeError {
 }
 
 mod http_pipe {
-    use super::{HttpPipe, HttpPipeError};
-    use crate::pipe::imdb_datasets::{DatasetKind, Chunk};
-    use crate::pipe::Pipe;
+    use super::{HttpPipe, HttpPipeError, DatasetKind, Chunk};
+    use crate::Pipe;
     use async_compression::stream::GzipDecoder;
     use futures::stream::{Stream, StreamExt};
     use async_trait::async_trait;
@@ -61,7 +60,7 @@ mod http_pipe {
     impl Pipe<DatasetKind, Chunk> for HttpPipe {
         type Error = HttpPipeError;
         type Stream = impl Stream<Item = Result<Chunk, Self::Error>> + Send + Unpin;
-        async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             let url = match token {
                 DatasetKind::TitlePrincipals => "https://datasets.imdbws.com/title.principals.tsv.gz",
                 DatasetKind::NameBasics => "https://datasets.imdbws.com/name.basics.tsv.gz",
@@ -91,9 +90,8 @@ mod http_pipe {
 }
 
 mod local_file_pipe {
-    use super::{LocalFilePipe, LocalFilePipeError};
-    use crate::pipe::imdb_datasets::{DatasetKind, Chunk};
-    use crate::pipe::Pipe;
+    use super::{LocalFilePipe, LocalFilePipeError, DatasetKind, Chunk};
+    use crate::Pipe;
     use async_compression::stream::GzipDecoder;
     use futures::stream::{Stream, StreamExt};
     use async_trait::async_trait;
@@ -111,7 +109,7 @@ mod local_file_pipe {
     impl<P: AsRef<Path> + Send + Sync> Pipe<DatasetKind, Chunk> for LocalFilePipe<P> {
         type Error = LocalFilePipeError;
         type Stream = impl Stream<Item = Result<Chunk, Self::Error>> + Send + Unpin;
-        async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             let stream = GzipDecoder::new(
                 tokio_util::codec::FramedRead::new(
                     tokio::fs::File::open(self.file_map[&token].as_ref()).await?,

@@ -7,3 +7,5 @@ pub use imdbid::ValidationError as ImdbIdError;
 
 #[derive(Debug, Deref, AsRef)]
 pub struct Filename(pub String);
+
+pub struct Refresh;

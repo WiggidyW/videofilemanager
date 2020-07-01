@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use derive_more::{Display, Error};
+use super::{DatasetKind, ChunkRow, Chunk, ChunkExtra};
 
 #[derive(Debug, Clone)]
 pub struct ChunkRowPipe<P> {
@@ -12,9 +13,8 @@ pub enum ChunkRowPipeError<E> {
 }
 
 mod chunk_row_pipe {
-    use super::{ChunkRowPipe, ChunkRowPipeError};
-    use crate::pipe::imdb_datasets::{DatasetKind, Chunk, ChunkRow, ChunkExtra};
-    use crate::pipe::Pipe;
+    use super::{ChunkRowPipe, ChunkRowPipeError, DatasetKind, ChunkRow, Chunk, ChunkExtra};
+    use crate::Pipe;
     use async_trait::async_trait;
     use std::sync::Arc;
     use futures::stream::Stream;
@@ -37,9 +37,9 @@ mod chunk_row_pipe {
     impl<P: Pipe<DatasetKind, Chunk>> Pipe<DatasetKind, ChunkRow> for ChunkRowPipe<P> {
         type Error = ChunkRowPipeError<P::Error>;
         type Stream = impl Stream<Item = Result<ChunkRow, Self::Error>> + Send + Unpin;
-        async fn get(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
+        async fn pull(self: &Arc<Self>, token: DatasetKind) -> Result<Self::Stream, Self::Error> {
             use futures::stream::StreamExt;
-            match self.chunk_pipe.get(token).await {
+            match self.chunk_pipe.pull(token).await {
                 Ok(stream) => Ok(ChunkRowStream::new(stream).skip(1)), // skip the header row
                 Err(e) => Err(ChunkRowPipeError::ChunkPipeError(e)),
             }
@@ -75,8 +75,8 @@ mod chunk_row_pipe {
                     self.refresh(chunk);
                     self.poll_next(cx)
                 },
-                None => Poll::Ready(None),
                 Some(Err(e)) => Poll::Ready(Some(Err(ChunkRowPipeError::ChunkPipeError(e)))),
+                None => Poll::Ready(None),
             }
         }
     }
