@@ -1,13 +1,10 @@
 mod data;
 
-// pub mod source;
-// pub mod rows;
-// pub mod db_pipe;
+pub mod db_pipe;
 pub mod chunk;
 pub mod rows;
 
 pub use data::*;
-pub use Error as DataError;
 
 #[cfg(test)]
 mod tests {
@@ -17,23 +14,39 @@ mod tests {
     use std::convert::TryFrom;
     use std::sync::Arc;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     #[tokio::test(threaded_scheduler)]
     async fn test_local_files_correct_row_count() {
-        let rows_pipe = Arc::new(rows::ChunkRowPipe::new(Arc::new(chunk::LocalFilePipe::new(
-            {
-                let mut file_map = HashMap::new();
-            }
-        ))));
-        let rows_pipe = rows::RowsPipe::new(source::LocalFilePipe::new("resources/test"));
-        let mut stream = rows_pipe.get(()).await.unwrap();
-        let mut counter: usize = 0;
-        while let Some(rows) = stream.next().await {
-            let rows = rows.unwrap();
-            let num_rows = rows.try_iter().unwrap().collect::<Result<Vec<_>, _>>().unwrap().len();
-            counter += num_rows;
+        let rows_pipe = Arc::new(rows::ChunkRowPipe::new(Arc::new(
+            chunk::LocalFilePipe::new( {
+                let mut file_map = HashMap::new();                
+                file_map.insert(DatasetKind::TitlePrincipals, "resources/test/datasets/title.principals.tsv.gz");
+                file_map.insert(DatasetKind::NameBasics, "resources/test/datasets/name.basics.tsv.gz");
+                file_map.insert(DatasetKind::TitleAkas, "resources/test/datasets/title.akas.tsv.gz");
+                file_map.insert(DatasetKind::TitleBasics, "resources/test/datasets/title.basics.tsv.gz");
+                file_map.insert(DatasetKind::TitleCrew, "resources/test/datasets/title.crew.tsv.gz");
+                file_map.insert(DatasetKind::TitleEpisode, "resources/test/datasets/title.episode.tsv.gz");
+                file_map.insert(DatasetKind::TitleRatings, "resources/test/datasets/title.ratings.tsv.gz");
+                file_map
+            })
+        )));
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut vec = Vec::with_capacity(7);
+        for kind in DatasetKind::iter() {
+            let rows_pipe = rows_pipe.clone();
+            let counter = counter.clone();
+            vec.push(tokio::spawn(async move {
+                let mut stream = rows_pipe.get(kind).await.unwrap();
+                while let Some(_) = stream.next().await {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                }
+            }));
         }
-        assert_eq!(counter, 90_938_739);
+        for fut in vec {
+            fut.await.unwrap();
+        }
+        assert_eq!(counter.load(Ordering::Relaxed), 90_938_739);
     }
 }
 //     #[tokio::test(threaded_scheduler)]
